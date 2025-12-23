@@ -48,9 +48,6 @@ def Ndmi(input_b8:str,input_b11:str,export_image:bool=False)->None:
         plt.imshow(ndmi, cmap='RdYlGn'); plt.colorbar(); plt.title('NDMI'); plt.tight_layout()
         plt.savefig(os.path.join(png_dir, 'ndmi.png'), dpi=300, bbox_inches='tight'); plt.close()
 
-        plt.figure(figsize=(8,6)); 
-        plt.savefig(os.path.join(png_dir, 'ndvi_risk_map.png'), dpi=300, bbox_inches='tight'); plt.close()
-
         print(f"Imágenes guardadas en:\n - Rasters: {tiff_dir}\n - PNGs: {png_dir}")
 
 
