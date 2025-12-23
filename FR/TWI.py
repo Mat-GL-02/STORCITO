@@ -1,9 +1,13 @@
 import os
 import rasterio
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-def twi(input_b1:str,input_b3,input_b5:str,input_b6:str,input_b8:str,input_b12:str,export_image:bool=False)->None:
+from pathlib import Path
+from setup import check_valid_entries
+
+def twi(input_folder:str='INPUT',output_folder:str="OUTPUT",export_image:bool=False)->None:
     """Calcula el TWI
 
     Args:
@@ -15,61 +19,58 @@ def twi(input_b1:str,input_b3,input_b5:str,input_b6:str,input_b8:str,input_b12:s
         input_b12 (str): _description_
         export_image (bool, optional): _description_. Defaults to False.
     """
+    valids,invalids=check_valid_entries(["B01","B03","B05","B06","B08","B12"],input_folder=input_folder)
 
-    with rasterio.open(input_b1) as b8_src:
-        band_1 = b8_src.read(1).astype('float32')
-        meta_ref = b8_src.meta.copy()
+    if not valids:
+        raise ValueError(f"No se encontraron entradas válidas con las bandas requeridas para calcular el TWI.\n \
+                         Prueba a en la muestra {invalids[0]['fecha_inicio']}_{invalids[0]['fecha_fin']} \n \
+                         \t añadiendo las bandas faltantes: {', '.join(invalids[0]['bandas_faltantes'])} ")
+        
+    entry_arrays_tiffs={}
+    meta_ref={}
 
-    with rasterio.open(input_b3) as b4_src:
-        band_3 = b4_src.read(1).astype('float32')
-    
-    with rasterio.open(input_b5) as b4_src:
-        band_5 = b4_src.read(1).astype('float32')
+    for listado in valids:
+        bands=[]
+        
+        for path in listado['archivos']:
 
-    with rasterio.open(input_b6) as b4_src:
-        band_6 = b4_src.read(1).astype('float32')
+            with rasterio.open(path) as src:
 
-    with rasterio.open(input_b6) as b4_src:
-        band_8 = b4_src.read(1).astype('float32')
-
-    with rasterio.open(input_b12) as b4_src:
-        band_12 = b4_src.read(1).astype('float32')
-
-
-
+                if listado['fecha_inicio'] not in meta_ref:
+                    meta_ref[listado['fecha_inicio']]=src.meta.copy()
+                    
+                bands.append(src.read(1).astype(np.float32))
+        name_keys = ['fecha_inicio', 'fecha_fin', 'satelite', 'nivel']
+        entry_arrays_tiffs["_".join(listado[k] for k in name_keys)]=bands
+  
+      
     np.seterr(divide='ignore', invalid='ignore')
-    twi = 2.84 * (band_5 - band_6) / (band_3 + band_12) + ( 1.25 * ( band_3 - band_1 ) - ( band_8 - band_1 ) ) / ( band_8 + 1.25 *  band_3 - 0.25 * band_1 )  
 
-    # Preguntar si guardar imágenes (TIFF/TIF en una carpeta, PNG en otra)
+    twi =[ 2.84 * (instance[2] - instance[3]) / (instance[1] + instance[5]) + 
+          ( 1.25 * ( instance[1] - instance[0] ) - ( instance[4] - instance[0] ) ) / ( instance[4] + 1.25 *  instance[1] - 0.25 * instance[0] )  
+          for instance in entry_arrays_tiffs.values() ]
 
     if export_image:
-        tiff_dir = r'..\OUTPUT\TWI'
-        png_dir = r'..\OUTPUT\TWI\PNGs'
 
-        os.makedirs(tiff_dir, exist_ok=True); os.makedirs(png_dir, exist_ok=True)
+        tiff_dir=Path(output_folder)/'TWI'/'TIFFs'
+        png_dir=Path(output_folder)/'TWI'/'PNGs'
 
-        # Guardar TWI como .tiff y .tif (float32)
-        meta_twi = meta_ref.copy()
+        tiff_dir.mkdir(parents=True, exist_ok=True); png_dir.mkdir(parents=True, exist_ok=True)
 
-        meta_twi.update(driver='GTiff', dtype='float32', count=1)
-        twi_tiff = os.path.join(tiff_dir, 'twi.tiff')
-        twi_tif  = os.path.join(tiff_dir, 'twi.tif')
+        for meta_i,twi_i_array,extra_info in zip(meta_ref.values(),twi,entry_arrays_tiffs.keys()):
+    
+            meta_i.update(driver='GTiff', dtype='float32', count=1)
+            
+            twi_tiff = tiff_dir/f'{extra_info}_(TWI).tiff'
+            twi_tif  = tiff_dir/f'{extra_info}_(TWI).tif'
 
-        with rasterio.open(twi_tiff, 'w', **meta_twi) as dst: dst.write(twi.astype('float32'), 1)
-        with rasterio.open(twi_tif,  'w', **meta_twi) as dst: dst.write(twi.astype('float32'), 1)
-
-        # Guardar reclasificado como .tiff y .tif (int32)
-        meta_recl = meta_ref.copy(); meta_recl.update(driver='GTiff', dtype='int32', count=1)
-
-
-        # Guardar PNGs en carpeta separada
-        plt.figure(figsize=(8,6)); 
-        plt.imshow(twi, cmap='RdYlGn'); plt.colorbar(); plt.title('TWI'); plt.tight_layout()
-        plt.savefig(os.path.join(png_dir, 'twi.png'), dpi=300, bbox_inches='tight'); plt.close()
-
+            with rasterio.open(twi_tiff, 'w', **meta_i) as dst: 
+                dst.write(twi_i_array.astype('float32'), 1)
+            
+            with rasterio.open(twi_tif,  'w', **meta_i) as dst: 
+                dst.write(twi_i_array.astype('float32'), 1)
 
         print(f"Imágenes guardadas en:\n - Rasters: {tiff_dir}\n - PNGs: {png_dir}")
 
-    # Mostrar las imágenes siempre (independientemente de la elección)
-    plt.figure(figsize=(8,6)); 
-    plt.imshow(twi, cmap='RdYlGn'); plt.colorbar(); plt.title('TWI'); plt.tight_layout(); plt.show()
+if __name__ == "__main__":
+    twi(export_image=True)  
