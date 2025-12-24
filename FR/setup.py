@@ -1,13 +1,15 @@
 import os
 import shutil
 import re
+import rasterio
+import numpy as np
 
 from pathlib import Path
 from datetime import datetime as time
 from collections import defaultdict
 from typing import Literal
 
-def parse_filename(filename:str)->dict[str,str]|None:
+def parse_filename(filename:str,specific:str|None=None)->dict[str,str]|None:
     """
     Parsea nombres de archivo con el patrón Sentinel.
     Ejemplo: '2023-01-01-10_30_2023-01-15-10_30_Sentinel-2_L2A_B02_(Raw'
@@ -23,14 +25,16 @@ def parse_filename(filename:str)->dict[str,str]|None:
     match = full_pattern.match(filename)
 
     if match:
-        return {
-            'fecha_inicio': match.group('fecha_inicio'),
-            'fecha_fin': match.group('fecha_fin'),
-            'satelite': match.group('satelite'),
-            'nivel': match.group('nivel'),
-            'banda': match.group('banda'),
-            'filename': filename
-        }
+        final_result={
+                'fecha_inicio': match.group('fecha_inicio'),
+                'fecha_fin': match.group('fecha_fin'),
+                'satelite': match.group('satelite'),
+                'nivel': match.group('nivel'),
+                'banda': match.group('banda'),
+                'filename': filename
+            }
+
+        return final_result if not specific else final_result.get(specific,None)
 
 def get_output_folder(input_folder:str):
     if not os.path.isdir(input_folder):
@@ -169,13 +173,56 @@ def check_valid_entries(bands:list[str],input_folder:str="INPUT",
                 resultados_incompletos.append(resultado)
 
 
-        return resultados_completos, resultados_incompletos
-
     else:
         raise NotImplementedError(f"Satelite '{satelite}' not implemented yet.")
 
+    if not resultados_completos:
+        raise FileNotFoundError(f"No se encontraron entradas válidas con las bandas requeridas para calcular el TWI.\n \
+                         Prueba a en la muestra {resultados_incompletos[0]['fecha_inicio']}_{resultados_incompletos[0]['fecha_fin']} \n \
+                         \t añadiendo las bandas faltantes: {', '.join(resultados_incompletos[0]['bandas_faltantes'])} ")
+    
+    return resultados_completos, resultados_incompletos
+
+def read_and_group(valids:list[dict]):
+    entry_arrays_tiffs={}
+    meta_ref={}
+
+    good_dict=defaultdict(list)
+
+    for listado in valids:
+        bands=[]
+        
+        for path in listado['archivos']:
+
+            with rasterio.open(path) as src:
+
+                if listado['fecha_inicio'] not in meta_ref:
+                    meta_ref[listado['fecha_inicio']]=src.meta.copy()
+                    good_dict['meta_ref']=src.meta.copy()
+                    
+                bands.append(src.read(1).astype(np.float32))
+
+                current_band=parse_filename(path.name,'banda')
+                good_dict[current_band].append(src.read(1).astype(np.float32))
+
+        name_keys = ['fecha_inicio', 'fecha_fin', 'satelite', 'nivel']
+        entry_arrays_tiffs["_".join(listado[k] for k in name_keys)]=bands
+        good_dict['id'].append("_".join(listado[k] for k in name_keys))
+
+    return entry_arrays_tiffs,meta_ref,good_dict
+
+
+
 if __name__ == "__main__":
     valid,falty=check_valid_entries(["B04","B08"])
+    a,b,c=read_and_group(valid)
+
+
     print(valid)
     print('='*200)
     print(falty)
+    print('='*200)
+    print('='*200)
+    print(c['id'])
+    print('='*200)
+    print(c[['B04','BO8']])
