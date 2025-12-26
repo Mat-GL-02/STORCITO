@@ -3,83 +3,67 @@ import rasterio
 import numpy as np
 import matplotlib.pyplot as plt
 
-from setup import check_valid_entries,parse_filename,read_and_group
+from setup import check_valid_entries,parse_filename,read_and_group,save_tiffs
 from pathlib import Path
 
 def Ndvi(input_folder:str='INPUT',output_folder:str='OUTPUT',export_image:bool=False)->None:
-    
-    
-    valids,invalids=check_valid_entries(["B04","B08"],input_folder=input_folder)
+    """_summary_
+
+    Args:
+        input_folder (str, optional): _description_. Defaults to 'INPUT'.
+        output_folder (str, optional): _description_. Defaults to 'OUTPUT'.
+        export_image (bool, optional): _description_. Defaults to False.
+    """
+    bandas_requeridas=["B04","B08"]
+
+    valids,invalids=check_valid_entries(bandas_requeridas,input_folder=input_folder)
   
-    entry_arrays_tiffs,meta_ref,_=read_and_group(valids)
+    _,meta_ref,info=read_and_group(valids)
       
     np.seterr(divide='ignore', invalid='ignore')
 
-    ndvi =[(instance[1] - instance[0]) / (instance[1] + instance[0]) for instance in entry_arrays_tiffs.values()]
+    ndvi =[(info['B08'][i] - info['B04'][i]) / (info['B08'][i] + info['B04'][i]) 
+           for i in range(len(info['id']))]
 
-    # print(f'NDVI Layer processing...')
+    condiciones = [
+        (ndvi_i <= 0.27,
+        (ndvi_i > 0.27) & (ndvi_i <= 0.40),
+        (ndvi_i > 0.40) & (ndvi_i <= 0.54),
+        (ndvi_i > 0.54) & (ndvi_i <= 0.67),
+        ndvi_i > 0.67) 
+        for ndvi_i in ndvi]
+    
+    valores = [5, 4, 3, 2, 1]
 
-    # with rasterio.open(input_band8) as b8_src:
-    #     nir_band = b8_src.read(1).astype('float32')
-    #     meta_ref = b8_src.meta.copy()
+    reclasificados = [np.select(cond, valores, default=0).astype('int32') for cond in condiciones]
 
-    # with rasterio.open(input_band4) as b4_src:
-    #     red_band = b4_src.read(1).astype('float32')
+    tiff_dir = Path(output_folder)/'NDVI'/'TIFFs'
+    png_dir = Path(output_folder)/'NDVI'/'PNGs'
 
-    # np.seterr(divide='ignore', invalid='ignore')
-    # ndvi = (nir_band - red_band) / (nir_band + red_band)
+    tiff_dir.mkdir(parents=True, exist_ok=True); png_dir.mkdir(parents=True, exist_ok=True)
 
-    # # Reclasificación
-    # reclasificado = np.zeros_like(ndvi, dtype='int32')
-    # reclasificado[ndvi <= 0.27] = 5
-    # reclasificado[(ndvi > 0.27) & (ndvi <= 0.40)] = 4
-    # reclasificado[(ndvi > 0.40) & (ndvi <= 0.54)] = 3
-    # reclasificado[(ndvi > 0.54) & (ndvi <= 0.67)] = 2
-    # reclasificado[ndvi > 0.67] = 1
+    if export_image:
+        
+        for ndvi_i,meta_ref_i,extra_info in zip(ndvi,info['meta_ref'],info['id']): 
 
-    # # Preguntar si guardar imágenes (TIFF/TIF en una carpeta, PNG en otra)
-    # while True:
-    #     choice = input("¿Deseas guardar las imágenes? (y/n): ").lower().strip()
-    #     if choice in ('y','n'): break
-    #     print("Entrada no válida. Introduce 'y' o 'n'")
+            save_tiffs(ndvi_i,meta_ref_i,extra_info,'NDVI',tiff_dir)
+            plt.figure(figsize=(8,6))
+            plt.imshow(ndvi, cmap='RdYlGn'); plt.colorbar(); plt.title('NDVI'); plt.tight_layout()
+            plt.savefig(png_dir/f'{extra_info}_(NDVI).png', dpi=300, bbox_inches='tight'); plt.close()
 
-    # if choice == 'y':
-    #     tiff_dir = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\re'
-    #     png_dir = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\NDVI'
-    #     os.makedirs(tiff_dir, exist_ok=True); os.makedirs(png_dir, exist_ok=True)
 
-    #     # Guardar NDVI como .tiff y .tif (float32)
-    #     meta_ndvi = meta_ref.copy()
-    #     meta_ndvi.update(driver='GTiff', dtype='float32', count=1)
-    #     ndvi_tiff = os.path.join(tiff_dir, 'ndvi.tiff')
-    #     ndvi_tif  = os.path.join(tiff_dir, 'ndvi.tif')
-    #     with rasterio.open(ndvi_tiff, 'w', **meta_ndvi) as dst: dst.write(ndvi.astype('float32'), 1)
-    #     with rasterio.open(ndvi_tif,  'w', **meta_ndvi) as dst: dst.write(ndvi.astype('float32'), 1)
+        for reclasificado_i,meta_ref_i,extra_info in zip(reclasificados,info['meta_ref'],info['id']):
 
-    #     # Guardar reclasificado como .tiff y .tif (int32)
-    #     meta_recl = meta_ref.copy(); meta_recl.update(driver='GTiff', dtype='int32', count=1)
-    #     recl_tiff = os.path.join(tiff_dir, 'ndvi_risk_map.tiff')
-    #     recl_tif  = os.path.join(tiff_dir, 'ndvi_risk_map.tif')
-    #     with rasterio.open(recl_tiff, 'w', **meta_recl) as dst: dst.write(reclasificado.astype('int32'), 1)
-    #     with rasterio.open(recl_tif,  'w', **meta_recl) as dst: dst.write(reclasificado.astype('int32'), 1)
+            save_tiffs(reclasificado_i,meta_ref_i,extra_info,'NDVI_Risk_Map',tiff_dir)
+            plt.figure(figsize=(8,6)) 
+            plt.imshow(reclasificado_i, cmap='Reds'); plt.colorbar(); plt.title('NDVI Risk Map'); plt.tight_layout()
+            plt.savefig(png_dir/f'{extra_info}_(NDVI_Risk_Map).png', dpi=300, bbox_inches='tight'); plt.close()
 
-    #     # Guardar PNGs en carpeta separada
-    #     plt.figure(figsize=(8,6)); plt.imshow(ndvi, cmap='RdYlGn'); plt.colorbar(); plt.title('NDVI'); plt.tight_layout()
-    #     plt.savefig(os.path.join(png_dir, 'ndvi.png'), dpi=300, bbox_inches='tight'); plt.close()
-
-    #     plt.figure(figsize=(8,6)); plt.imshow(reclasificado, cmap='Reds'); plt.colorbar(); plt.title('NDVI Risk Map'); plt.tight_layout()
-    #     plt.savefig(os.path.join(png_dir, 'ndvi_risk_map.png'), dpi=300, bbox_inches='tight'); plt.close()
-
-    #     print(f"Imágenes guardadas en:\n - Rasters: {tiff_dir}\n - PNGs: {png_dir}")
-    # else:
-    #     print("Imágenes no guardadas")
+        print(f"Imágenes guardadas en:\n - Rasters: {tiff_dir}\n - PNGs: {png_dir}")
 
     # # Mostrar las imágenes siempre (independientemente de la elección)
     # plt.figure(figsize=(8,6)); plt.imshow(ndvi, cmap='RdYlGn'); plt.colorbar(); plt.title('NDVI'); plt.tight_layout(); plt.show()
     # plt.figure(figsize=(8,6)); plt.imshow(reclasificado, cmap='Reds'); plt.colorbar(); plt.title('NDVI Risk Map'); plt.tight_layout(); plt.show()
-
-    # print('NDVI Layer completed')
-    # return
 
 if __name__ == "__main__":
     Ndvi(export_image=True)

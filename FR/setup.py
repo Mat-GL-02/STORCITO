@@ -9,7 +9,10 @@ from datetime import datetime as time
 from collections import defaultdict
 from typing import Literal
 
+import numpy.typing as npt
+
 def parse_filename(filename:str,specific:str|None=None)->dict[str,str]|None:
+    
     """
     Parsea nombres de archivo con el patrón Sentinel.
     Ejemplo: '2023-01-01-10_30_2023-01-15-10_30_Sentinel-2_L2A_B02_(Raw'
@@ -184,6 +187,15 @@ def check_valid_entries(bands:list[str],input_folder:str="INPUT",
     return resultados_completos, resultados_incompletos
 
 def read_and_group(valids:list[dict]):
+    """_summary_
+
+    Args:
+        valids (list[dict]): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
     entry_arrays_tiffs={}
     meta_ref={}
 
@@ -211,7 +223,18 @@ def read_and_group(valids:list[dict]):
 
     return entry_arrays_tiffs,meta_ref,good_dict
 
+def save_tiffs(array:npt.NDArray[np.float32],meta:dict,id_name:str,type_name:str,output_path:Path)->None:
+    meta_i=meta.copy()
+    meta_i.update(driver='GTiff', dtype='float32', count=1)
 
+    tiff_dir=output_path/f'{id_name}_({type_name}).tiff'
+    tif_dir=output_path/f'{id_name}_({type_name}).tif'
+
+    with rasterio.open(tiff_dir,'w',**meta) as dst:
+        dst.write(array.astype('float32'),1)
+    with rasterio.open(tif_dir,'w',**meta) as dst:
+        dst.write(array.astype('float32'),1)
+    
 
 if __name__ == "__main__":
     valid,falty=check_valid_entries(["B04","B08"])
