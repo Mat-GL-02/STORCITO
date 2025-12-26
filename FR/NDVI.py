@@ -3,7 +3,7 @@ import rasterio
 import numpy as np
 import matplotlib.pyplot as plt
 
-from setup import check_valid_entries,parse_filename,read_and_group,save_tiffs
+from setup import *
 from pathlib import Path
 
 def Ndvi(input_folder:str='INPUT',output_folder:str='OUTPUT',export_image:bool=False)->None:
