@@ -14,7 +14,7 @@ def GCI(input_folder:str='INPUT',output_folder:str='OUTPUT',export_image:bool=Fa
         output_folder (str, optional): _description_. Defaults to 'OUTPUT'.
         export_image (bool, optional): _description_. Defaults to False.
     """
-
+#ESTOY HACIENDO COSAS
     valids,_=check_valid_entries(["B03","B08"],input_folder=input_folder)
     
     _,_,info=read_and_group(valids)
