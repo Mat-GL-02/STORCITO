@@ -224,8 +224,8 @@ def fire_history(input_folder:str|Path=Path('INPUT'), output_folder:str|Path = P
         tmeta = target_meta.copy()
         tmeta.update(dtype='float32', count=1)
 
-        save_file(suma_total,'Fire_History_Sum',output_folder,tmeta,f'{time_range}',extensions=['tif','tiff','png'],fig=cumulative_figure)
-        save_file(reclas,'Fire_History_(Risk_Map)',output_folder,tmeta,f'{time_range}',extensions=['tif','tiff','png'],fig=reclasified_figure)
+        save_file(suma_total,tmeta,'Fire_History_Sum',output_folder,f'{time_range}',extensions=['tif','tiff','png'],fig=cumulative_figure)
+        save_file(reclas,tmeta,'Fire_History_(Risk_Map)',output_folder,f'{time_range}',extensions=['tif','tiff','png'],fig=reclasified_figure)
 
     return suma_total, reclas
 

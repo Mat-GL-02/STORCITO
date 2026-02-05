@@ -21,12 +21,41 @@ ROTHERMEL_MAP = {
     62: 5, 7: 0
 }
 FINAL_MAP = {
-    1: 3, 2: 1, 3: 4, 
-    4: 5, 5: 3, 6: 4, 
-    7: 5, 8: 2, 9: 3, 
-    10: 4, 11: 4, 
+    1: 3, 2: 1, 3: 4,
+    4: 5, 5: 3, 6: 4,
+    7: 5, 8: 2, 9: 3,
+    10: 4, 11: 4,
     12: 4, 13: 5,
 }
+
+
+def fmt_from_array(fmt_eu: np.ndarray) -> np.ndarray:
+    """Calculates Fuel Model Type (FMT) risk from array input.
+
+    Remaps European FMT codes to Rothermel fuel model types and then to final
+    risk categories using lookup tables.
+
+    Args:
+        fmt_eu: 2D array with European FMT codes.
+
+    Returns:
+        2D array (float32) with final FMT risk categories (1-5).
+        Unmapped values are set to np.nan.
+    """
+    fmt_rothermel = np.select(
+        [fmt_eu == k for k in ROTHERMEL_MAP.keys()],
+        list(ROTHERMEL_MAP.values()),
+        default=np.nan
+    ).astype(np.float32)
+
+    fmt_final = np.select(
+        [fmt_rothermel == k for k in FINAL_MAP.keys()],
+        list(FINAL_MAP.values()),
+        default=np.nan
+    ).astype(np.float32)
+
+    return fmt_final
+
 
 def fmt(input_file:str|Path,output_folder=Path('OUTPUT') ,file_name:str='FMT',
         export_image:bool=False,show_plots:bool=True) -> np.ndarray:
@@ -59,22 +88,7 @@ def fmt(input_file:str|Path,output_folder=Path('OUTPUT') ,file_name:str='FMT',
         fmt_eu = src.read(1).astype('float32')
         meta = src.meta.copy()
 
-    fmt_rothermel = np.select(
-        [fmt_eu == k for k in ROTHERMEL_MAP.keys()],
-        list(ROTHERMEL_MAP.values()),
-        default=0
-    ).astype('int32')
-    
-    fmt_final = np.select(
-        [fmt_rothermel == k for k in FINAL_MAP.keys()],
-        list(FINAL_MAP.values()),
-        default=0
-    ).astype('int32')
-    
-    # unmapped data 
-    unmapped = np.sum(~np.isin(fmt_eu, list(ROTHERMEL_MAP.keys())))
-    if unmapped > 0:
-        print(f"{unmapped} pixels unmapped in ROTHERMEL_MAP")
+    fmt_final = fmt_from_array(fmt_eu)
     
 
     
@@ -85,8 +99,7 @@ def fmt(input_file:str|Path,output_folder=Path('OUTPUT') ,file_name:str='FMT',
 
     if export_image:
 
-        meta.update(dtype='int32', nodata=-9999, count=1, driver='GTiff')
-        save_file(fmt_final, file_name, output_folder, meta, extensions=['tif','png'], fig=fig1,meta_intact=True)
+        save_file(fmt_final, meta, file_name, output_folder, extensions=['tif','png'], fig=fig1,meta_intact=True)
 
     return fmt_final
 

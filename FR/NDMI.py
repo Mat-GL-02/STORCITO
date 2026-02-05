@@ -6,7 +6,33 @@ import matplotlib.pyplot as plt
 from FR.rutinas.setup import *
 from pathlib import Path
 
-def ndmi(b8:str|Path,b11:str|Path,output_folder:str='OUTPUT',export_image:bool=False)->None:
+
+def ndmi_from_array(b8: np.ndarray, b11: np.ndarray) -> np.ndarray:
+    """Calculate NDMI (Normalized Difference Moisture Index) from band arrays.
+
+    NDMI = (NIR - SWIR) / (NIR + SWIR)
+
+    Args:
+        b8: 2D array of Band 8 (NIR) reflectance values.
+        b11: 2D array of Band 11 (SWIR) reflectance values.
+
+    Returns:
+        2D array (float32) with NDMI values in range [-1, 1].
+        Division by zero and invalid values are set to np.nan.
+    """
+    b8_f = b8.astype(np.float32)
+    b11_f = b11.astype(np.float32)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ndmi = (b8_f - b11_f) / (b8_f + b11_f)
+
+    # Replace inf and invalid values with nan
+    ndmi[~np.isfinite(ndmi)] = np.nan
+
+    return ndmi
+
+
+def ndmi(b8:str|Path,b11:str|Path,output_folder:str='OUTPUT',export_image:bool=False)->np.ndarray:
     """_summary_
 
     Args:
@@ -28,15 +54,15 @@ def ndmi(b8:str|Path,b11:str|Path,output_folder:str='OUTPUT',export_image:bool=F
         meta_ref = src_b11.meta.copy()
     with rasterio.open(b8) as src_b8:
         band8 = src_b8.read(1).astype('float32')
-    
+
     mini_info=parse_filename(b11.name)
     name_id=mini_info.id
 
-    ndmi = (band8 - band11) / ( band8 + band11 )
+    ndmi = ndmi_from_array(band8, band11)
     
     if export_image:
         fig1,ax1=default_imshow(ndmi,'ndmi')
-        save_file(ndmi, name_id, output_folder, meta_ref, 'NDMI',extensions=['tif','tiff','png'], fig=fig1)
+        save_file(ndmi, meta_ref, name_id, output_folder, 'NDMI',extensions=['tif','tiff','png'], fig=fig1)
 
     return ndmi
 
@@ -62,7 +88,7 @@ def NDMI_folder(input_folder:str='INPUT',output_folder:str="OUTPUT",export_image
 
         for ndm_i,meta_ref_i,extra_info in zip(ndmi,info['meta_ref'],info['id']):
             fig1,ax1=default_imshow(ndm_i,'NDMI')
-            save_file(ndm_i, extra_info, output_folder, meta_ref_i, 'NDMI',extensions=['tif','tiff','png'], fig=fig1)
+            save_file(ndm_i, meta_ref_i, extra_info, output_folder, 'NDMI',extensions=['tif','tiff','png'], fig=fig1)
     
     return ndmi
 

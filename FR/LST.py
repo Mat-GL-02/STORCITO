@@ -28,6 +28,7 @@ from rasterio.features import geometry_mask
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from pyresample import geometry, kd_tree
+from FR.rutinas.setup import save_file
 
 
 # =============================================================================
@@ -154,61 +155,7 @@ def resample_swath_to_grid(
 
 
 # =============================================================================
-# STEP 3: GEOTIFF EXPORT
-# =============================================================================
-
-def save_geotiff(
-    data: np.ndarray,
-    output_path: Union[str, Path],
-    bounds: Tuple[float, float, float, float],
-    crs: str = 'EPSG:4326',
-    nodata: float = -9999
-) -> Path:
-    """
-    Save an array as GeoTIFF.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        2D data array to save
-    output_path : str or Path
-        Output path
-    bounds : tuple
-        (min_lon, min_lat, max_lon, max_lat)
-    crs : str
-        Coordinate reference system (default: EPSG:4326)
-    nodata : float
-        Value for invalid data
-
-    Returns
-    -------
-    Path
-        Path to saved file
-    """
-    output_path = Path(output_path)
-    min_lon, min_lat, max_lon, max_lat = bounds
-
-    transform = from_bounds(min_lon, min_lat, max_lon, max_lat, data.shape[1], data.shape[0])
-
-    with rasterio.open(
-        output_path, 'w',
-        driver='GTiff',
-        height=data.shape[0],
-        width=data.shape[1],
-        count=1,
-        dtype=data.dtype,
-        crs=crs,
-        transform=transform,
-        nodata=nodata
-    ) as dst:
-        dst.write(data, 1)
-
-    print(f'GeoTIFF saved: {output_path}')
-    return output_path
-
-
-# =============================================================================
-# STEP 4: SPATIAL CLIPPING OF LST
+# STEP 3: SPATIAL CLIPPING OF LST
 # =============================================================================
 
 def load_shapefile(shp_path: Union[str, Path], target_crs: str = 'EPSG:4326') -> gpd.GeoDataFrame:
@@ -460,7 +407,8 @@ def process_sentinel3_lst(
         print("\n" + "="*60)
         print("4. SAVING CLIPPED GEOTIFF")
         print("="*60)
-        save_geotiff(clipped_data, output_tif_clip, clipped_bounds)
+        save_file(clipped_data, clipped_meta, output_path=output_tif_clip, meta_intact=True)
+        print(f'GeoTIFF saved: {output_tif_clip}')
 
     # 5. Generate PNG (optional)
     if generate_png:
@@ -521,20 +469,31 @@ def calculate_tif_mean(tif_paths: list, output_path: Union[str, Path]) -> np.nda
 
 
 def reclassify_lst(data: np.ndarray, n_intervals: int = 5) -> np.ndarray:
-    """
-    Reclassify LST values into discrete categories.
+    """Reclassify LST values into discrete categories based on data extremes.
 
-    Parameters
-    ----------
-    data : np.ndarray
-        Input LST data
-    n_intervals : int
-        Number of classification intervals (default: 5)
+    Creates equal-width bins between the minimum and maximum temperature values
+    in the input data. This adaptive approach ensures the full dynamic range
+    of the specific dataset is captured, regardless of absolute temperature values.
 
-    Returns
-    -------
-    np.ndarray
-        Classified array as int8
+    Args:
+        data: 2D array with LST values. NaN values are ignored when computing min/max bounds.
+        n_intervals: Number of classification categories. Defaults to 5.
+
+    Returns:
+        2D array (int8) with class values from 1 to n_intervals.
+        Values outside bins are assigned to nearest boundary class.
+
+    Example:
+        For data ranging from 15°C to 45°C with n_intervals=5:
+        - Class 1: 15-21°C (coldest)
+        - Class 2: 21-27°C
+        - Class 3: 27-33°C
+        - Class 4: 33-39°C
+        - Class 5: 39-45°C (hottest)
+
+    Note:
+        Bins are computed dynamically from data, so the same class value
+        may represent different temperature ranges across different images.
     """
     bins = np.linspace(np.nanmin(data), np.nanmax(data), num=n_intervals + 1)
     classified = np.digitize(data, bins)

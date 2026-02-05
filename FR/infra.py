@@ -13,8 +13,99 @@ from pathlib import Path
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
 from shapely.geometry.base import BaseGeometry
+import numpy as np
 
 # sys.path.append(r'..\geo_auxy')
+
+
+def infra_from_array(
+    distance_arr: npt.NDArray,
+    radii: list[int] | None = None,
+    risks: list[int] | None = None
+) -> npt.NDArray:
+    """Classify infrastructure proximity risk from a distance array.
+
+    Reclassifies a distance-to-infrastructure array into risk categories
+    based on distance thresholds.
+
+    Args:
+        distance_arr: 2D array with distance values to nearest infrastructure (meters).
+        radii: Distance thresholds in meters. Defaults to [250, 500, 750, 1000, 1250].
+        risks: Risk values for each distance band. Defaults to [5, 4, 3, 2, 1].
+
+    Returns:
+        2D array (float32) with risk categories. Values beyond max radius are np.nan.
+
+    Example:
+        >>> dist = compute_distance_to_roads(roads_gdf, shape, transform)
+        >>> risk = infra_from_array(dist)
+    """
+    if radii is None:
+        radii = [250, 500, 750, 1000, 1250]
+    if risks is None:
+        risks = [5, 4, 3, 2, 1]
+
+    conditions = []
+    for i, r in enumerate(radii):
+        if i == 0:
+            conditions.append(distance_arr <= r)
+        else:
+            conditions.append((distance_arr > radii[i - 1]) & (distance_arr <= r))
+
+    return np.select(conditions, risks, default=np.nan).astype(np.float32)
+
+
+def infra_from_gdf(
+    gdf: gpd.GeoDataFrame,
+    shape: tuple[int, int],
+    transform,
+    radii: list[int] | None = None,
+    risks: list[int] | None = None
+) -> npt.NDArray:
+    """Rasterize infrastructure GeoDataFrame into risk categories.
+
+    Creates concentric buffer rings around infrastructure features and
+    rasterizes them into risk values.
+
+    Args:
+        gdf: GeoDataFrame with infrastructure geometries (lines/polygons).
+        shape: Output raster shape as (height, width).
+        transform: Affine transform for the output raster.
+        radii: Buffer radii in meters. Defaults to [250, 500, 750, 1000, 1250].
+        risks: Risk values for each buffer. Defaults to [5, 4, 3, 2, 1].
+
+    Returns:
+        2D array (float32) with risk categories (1-5). Areas beyond max
+        buffer distance are set to np.nan.
+    """
+    if radii is None:
+        radii = [250, 500, 750, 1000, 1250]
+    if risks is None:
+        risks = [5, 4, 3, 2, 1]
+
+    # Union all geometries
+    geom_union = gdf.geometry.union_all()
+
+    # Create risk rings
+    anillos = _create_risk_rings(geom_union, radii, risks)
+    anillos.crs = gdf.crs
+
+    # Rasterize with 0 as fill, then replace with np.nan
+    geoms = ((geom, val) for geom, val in zip(anillos.geometry, anillos['risk']))
+    raster_data = rasterize(
+        geoms,
+        out_shape=shape,
+        transform=transform,
+        fill=0,
+        dtype=np.float32,
+        all_touched=True
+    )
+
+    # Replace fill value with np.nan
+    raster_data[raster_data == 0] = np.nan
+
+    return raster_data
+
 
 def _create_risk_rings(geometry: BaseGeometry, radii: list[int], risks: list[int]) -> gpd.GeoDataFrame:
     """Crea anillos concéntricos de riesgo alrededor de geometría.
@@ -143,7 +234,7 @@ def infrastructure(input_infra: str|Path,
     # Guardar archivos si se solicita
     if export_image:
 
-        save_file(raster_data, input_infra.stem, output_folder, meta_info, 'INFRA Risk_Map',extensions=['tif','png'] ,fig=fig1, meta_intact=True)
+        save_file(raster_data, meta_info, input_infra.stem, output_folder, 'INFRA Risk_Map',extensions=['tif','png'] ,fig=fig1, meta_intact=True)
     
     return raster_data
 

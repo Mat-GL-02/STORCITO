@@ -12,6 +12,29 @@ from FR.rutinas.setup import (
 )
 from pathlib import Path
 
+
+def gci_from_array(b3: np.ndarray, b8: np.ndarray) -> np.ndarray:
+    """Calculate GCI (Green Chlorophyll Index) from band arrays.
+
+    GCI = (NIR / Green) - 1
+
+    Args:
+        b3: 2D array of Band 3 (Green) reflectance values.
+        b8: 2D array of Band 8 (NIR) reflectance values.
+
+    Returns:
+        2D array (float32) with GCI values. Division by zero and invalid
+        values are set to np.nan.
+    """
+    with np.errstate(divide='ignore', invalid='ignore'):
+        gci = (b8.astype(np.float32) / b3.astype(np.float32)) - 1
+
+    # Replace inf and invalid values with nan
+    gci[~np.isfinite(gci)] = np.nan
+
+    return gci
+
+
 def gci(b3:str|Path,b8:str|Path,output_folder:str='OUTPUT',
         export_image:bool=False,show_plots:bool=False)->np.ndarray:
     """Calculate GCI (Green Chlorophyll Index) from Sentinel-2 bands.
@@ -36,11 +59,11 @@ def gci(b3:str|Path,b8:str|Path,output_folder:str='OUTPUT',
         meta_ref = src_b3.meta.copy()
     with rasterio.open(b8) as src_b8:
         band8 = src_b8.read(1).astype('float32')
-    
+
     mini_info=parse_filename(b3.name)
     name_id=mini_info.id
 
-    gci = (band8 / band3) - 1
+    gci = gci_from_array(band3, band8)
     
     fig1,ax1=default_imshow(gci,'GCI')
     
@@ -48,7 +71,7 @@ def gci(b3:str|Path,b8:str|Path,output_folder:str='OUTPUT',
         plt.show()
 
     if export_image:
-        save_file(gci, name_id, output_folder, meta_ref, 'GCI',extensions=['tif','tiff','png'], fig=fig1)
+        save_file(gci, meta_ref, name_id, output_folder, 'GCI',extensions=['tif','tiff','png'], fig=fig1)
 
     return gci
 
@@ -84,7 +107,7 @@ def gci_folder(input_folder:str='INPUT',output_folder:str='OUTPUT',indices:None|
         for gci_i,meta_ref_i,extra_info in zip(gci,METAS,IDS):
             
             fig1,ax1=default_imshow(gci_i,'GCI')
-            save_file(gci_i, extra_info, output_folder, meta_ref_i, 'GCI',extensions=['tif','tiff','png'], fig=fig1)
+            save_file(gci_i, meta_ref_i, extra_info, output_folder, 'GCI',extensions=['tif','tiff','png'], fig=fig1)
 
 if __name__ == "__main__":
 

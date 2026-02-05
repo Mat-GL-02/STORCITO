@@ -15,6 +15,7 @@ import rasterio
 import whitebox
 import numpy as np
 
+from FR.rutinas.setup import RasterData,load_raster, save_file
 from pathlib import Path
 from functools import partial
 from typing import Any, Sequence
@@ -23,6 +24,7 @@ from concurrent.futures import ProcessPoolExecutor
 from numpy.typing import NDArray
 from dataclasses import dataclass, field
 from rasterio.warp import Resampling, reproject
+from rutinas.setup import save_file
 
 # =====================================================================
 # PUBLIC API
@@ -40,8 +42,6 @@ __all__ = [
     "find_dtm_files",
     "compute_twi_from_files",
     # Utilities
-    "load_raster",
-    "save_raster",
     "compute_flow_accumulation",
     "compute_twi",
 ]
@@ -160,127 +160,6 @@ _wbt.set_verbose_mode(False)
 # I/O FUNCTIONS
 # =====================================================================
 
-@dataclass
-class RasterData:
-    """Container for loaded raster data and metadata.
-
-    This dataclass encapsulates all information loaded from a raster file,
-    including the pixel values, geographic metadata, and nodata handling.
-
-    Attributes:
-        array: 2D array of pixel values as float32, with nodata converted to NaN.
-        profile: Rasterio profile dictionary with file metadata.
-        nodata: Original nodata value from the file, or None if not defined.
-        nodata_mask: Boolean mask where True indicates nodata pixels.
-        shape: Tuple of (height, width) in pixels.
-        transform: Affine transformation matrix for georeferencing.
-        crs: Coordinate Reference System of the raster.
-
-    Example:
-        >>> data = load_raster(Path("dem.tif"))
-        >>> data.shape
-        (1000, 1200)
-        >>> data.array[data.nodata_mask].size  # Number of nodata pixels
-        150
-    """
-    array: ArrayF32
-    profile: dict
-    nodata: float | None
-    nodata_mask: NDArray[np.bool_]
-    shape: tuple[int, int]
-    transform: Any  # rasterio.Affine
-    crs: Any  # rasterio.crs.CRS
-
-
-def load_raster(path: Path) -> RasterData:
-    """Load a raster file and normalize NODATA values to NaN.
-
-    Reads the first band of a raster file, converts it to float32, and replaces
-    nodata values with NaN for consistent numerical handling.
-
-    Args:
-        path: Path to the raster file (GeoTIFF or any GDAL-supported format).
-
-    Returns:
-        RasterData object containing the array, profile, nodata mask, and
-        geographic metadata (transform, CRS).
-
-    Raises:
-        rasterio.errors.RasterioIOError: If the file cannot be opened.
-
-    Example:
-        >>> dem_data = load_raster(Path("dtm_vigo.tif"))
-        >>> dem_data.array.shape
-        (500, 600)
-        >>> np.nanmin(dem_data.array)
-        12.5
-    """
-    with rasterio.open(path) as src:
-        arr_raw = src.read(1)
-        arr = arr_raw.astype(np.float32)
-        profile = src.profile.copy()
-        nodata = src.nodata
-        shape = (src.height, src.width)
-        transform = src.transform
-        crs = src.crs
-
-    if nodata is not None:
-        nodata_mask = (arr_raw == nodata) | np.isclose(arr_raw, nodata, rtol=1e-5)
-        arr[nodata_mask] = np.nan
-    else:
-        nodata_mask = np.zeros(shape, dtype=bool)
-
-    return RasterData(
-        array=arr,
-        profile=profile,
-        nodata=nodata,
-        nodata_mask=nodata_mask,
-        shape=shape,
-        transform=transform,
-        crs=crs
-    )
-
-
-def save_raster(
-    arr: ArrayF32,
-    out_path: Path,
-    reference_path: Path,
-    nodata: float = -9999,
-    compress: str = "LZW"
-) -> None:
-    """Save a numpy array as a GeoTIFF file.
-
-    Writes the array to a GeoTIFF, copying the georeference (CRS, transform,
-    dimensions) from a reference raster. NaN values are replaced with the
-    specified nodata value.
-
-    Args:
-        arr: 2D numpy array to save.
-        out_path: Destination path for the output GeoTIFF.
-        reference_path: Path to a reference raster for copying georeference.
-        nodata: Value to use for nodata pixels in the output. Defaults to -9999.
-        compress: Compression algorithm ("LZW", "DEFLATE", "ZSTD"). Defaults to "LZW".
-
-    Raises:
-        rasterio.errors.RasterioIOError: If the reference file cannot be opened
-            or the output cannot be written.
-
-    Example:
-        >>> twi = compute_twi(sca, slope)
-        >>> save_raster(twi, Path("twi_output.tif"), Path("dtm_reference.tif"))
-    """
-    with rasterio.open(reference_path) as ref:
-        profile = ref.profile.copy()
-
-    profile.update(dtype=rasterio.float32, compress=compress, nodata=nodata)
-
-    # Replace NaN with nodata
-    out_arr = np.where(np.isnan(arr), nodata, arr)
-
-    with rasterio.open(out_path, "w", **profile) as dst:
-        dst.write(out_arr.astype(np.float32), 1)
-
-
 def _save_temp_raster(arr: ArrayF32, path: Path, profile: dict, nodata: float) -> None:
     """Save temporary raster using profile directly (no reference file needed)."""
     prof = profile.copy()
@@ -302,7 +181,7 @@ def resample_to_grid(
     method: Resampling = Resampling.bilinear
 ) -> ArrayF32:
     """Reproject/resample an array to the destination grid."""
-    dst_arr = np.empty(dst_shape, dtype=np.float32)
+    dst_arr = np.full(dst_shape,np.nan, dtype=np.float32)
     reproject(
         source=src_arr,
         destination=dst_arr,
@@ -451,7 +330,7 @@ def apply_nodata_mask(arr: ArrayF32, mask: NDArray[np.bool_]) -> ArrayF32:
 # STATISTICS
 # =====================================================================
 
-def compute_stats(arr: ArrayF32, nodata: float = -9999.0) -> tuple[float, float, float]:
+def _compute_stats(arr: ArrayF32, nodata: float = -9999.0) -> tuple[float, float, float]:
     """Compute (min, max, mean) ignoring nodata and NaN."""
     valid = arr[(arr != nodata) & np.isfinite(arr)]
     if valid.size == 0:
@@ -582,14 +461,14 @@ def process_region(dtm_path: Path, config: ConfigTWI) -> RegionResult | None:
     _log("  Computing flow accumulation (D8)...")
     flow_arr = compute_flow_accumulation(dtm_data.array, dtm_data.profile, config.nodata_out)
     apply_nodata_mask(flow_arr, nodata_mask)
-    save_raster(flow_arr, flow_out, dtm_path, config.nodata_out)
+    save_file(flow_arr, dtm_data.profile, output_path=flow_out, meta_intact=True)
     _log(f"  -> {flow_out.name}")
 
     # 2) Specific Catchment Area
     _log("  Computing SCA...")
     sca_arr = flow_arr * pixel_size
     apply_nodata_mask(sca_arr, nodata_mask)
-    save_raster(sca_arr, sca_out, dtm_path, config.nodata_out)
+    save_file(sca_arr, dtm_data.profile, output_path=sca_out, meta_intact=True)
     _log(f"  -> {sca_out.name}")
 
     # 3) TWI
@@ -601,13 +480,13 @@ def process_region(dtm_path: Path, config: ConfigTWI) -> RegionResult | None:
         clip_range=config.twi_clip
     )
     apply_nodata_mask(twi_arr, nodata_mask)
-    save_raster(twi_arr, twi_out, dtm_path, config.nodata_out)
+    save_file(twi_arr, dtm_data.profile, output_path=twi_out, meta_intact=True)
     _log(f"  -> {twi_out.name}")
 
     # Statistics
-    flow_stats = compute_stats(flow_arr, config.nodata_out)
-    sca_stats = compute_stats(sca_arr, config.nodata_out)
-    twi_stats = compute_stats(twi_arr, config.nodata_out)
+    flow_stats = _compute_stats(flow_arr, config.nodata_out)
+    sca_stats = _compute_stats(sca_arr, config.nodata_out)
+    twi_stats = _compute_stats(twi_arr, config.nodata_out)
 
     _log(f"  FLOW [min, max, mean]: {flow_stats}")
     _log(f"  SCA  [min, max, mean]: {sca_stats}")
@@ -748,7 +627,7 @@ def compute_twi_from_files(
     apply_nodata_mask(flow_arr, nodata_mask)
 
     if flow_output_path is not None:
-        save_raster(flow_arr, flow_output_path, dtm_path, nodata)
+        save_file(flow_arr, dtm_data.profile, output_path=flow_output_path, meta_intact=True)
         _log(f"  -> Saved: {flow_output_path.name}")
 
     # 2) Specific Catchment Area
@@ -757,7 +636,7 @@ def compute_twi_from_files(
     apply_nodata_mask(sca_arr, nodata_mask)
 
     if sca_output_path is not None:
-        save_raster(sca_arr, sca_output_path, dtm_path, nodata)
+        save_file(sca_arr, dtm_data.profile, output_path=sca_output_path, meta_intact=True)
         _log(f"  -> Saved: {sca_output_path.name}")
 
     # 3) TWI
@@ -770,11 +649,11 @@ def compute_twi_from_files(
     )
     apply_nodata_mask(twi_arr, nodata_mask)
 
-    save_raster(twi_arr, twi_output_path, dtm_path, nodata)
+    save_file(twi_arr, dtm_data.profile, output_path=twi_output_path, meta_intact=True)
     _log(f"  -> Saved: {twi_output_path.name}")
 
     # Log statistics
-    twi_stats = compute_stats(twi_arr, nodata)
+    twi_stats = _compute_stats(twi_arr, nodata)
     _log(f"TWI stats [min, max, mean]: {twi_stats}")
 
     return twi_arr
@@ -955,10 +834,10 @@ def reclass_twi(twi_arr: NDArray) -> NDArray[np.int16]:
     ]
     choices = [5, 4, 3, 2, 1]
 
-    return np.select(conditions, choices, default=-9999).astype(np.int16)
+    return np.select(conditions, choices, default=np.nan).astype(np.int16)
 
 def main() -> None:
-    """Entry point for direct script execution."""
+
     run_twi_processing()
 
 

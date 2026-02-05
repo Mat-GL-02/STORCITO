@@ -13,6 +13,7 @@ from rasterio.transform import from_origin
 from scipy.interpolate import griddata
 
 
+
 def f_w_index(input_folder:str|Path,file_name:str='FWI_Risk_Map',output_folder:Path|str=Path('OUTPUT'),
     export_image:bool=False,show_plots:bool=False,crs:str="EPSG:4326")->np.ndarray:
 
@@ -176,7 +177,7 @@ def f_w_index(input_folder:str|Path,file_name:str='FWI_Risk_Map',output_folder:P
 
     if export_image:
 
-        save_file(fwi_clas, file_name, output_folder, meta, extensions=['tif','png'], fig=fig1, meta_intact=True)
+        save_file(fwi_clas, meta, file_name, output_folder, extensions=['tif','png'], fig=fig1, meta_intact=True)
 
     print("Fire Weather Index Layer completed.")
 

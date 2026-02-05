@@ -13,6 +13,61 @@ from rasterio.transform import from_bounds
 from rasterio.features import rasterize
 from rasterio.mask import mask
 
+
+def wui_from_array(
+    clc_arr: np.ndarray,
+    iuf_mask: np.ndarray | None = None
+) -> np.ndarray:
+    """Classify WUI (Wildland-Urban Interface) risk from CLC code array.
+
+    Reclassifies CORINE Land Cover codes into fire risk categories for
+    wildland-urban interface areas.
+
+    Args:
+        clc_arr: 2D array with CORINE Land Cover codes (Code_18).
+        iuf_mask: Optional boolean mask for IUF zone (True = inside IUF).
+            If None, all valid vegetation codes are classified.
+
+    Returns:
+        2D array (float32) with WUI risk categories (1-5).
+        Areas outside IUF mask or with invalid codes are set to np.nan.
+
+    Notes:
+        Risk classification by CLC code:
+        - code < 300 (agriculture): 1
+        - code 311 (broad-leaved forest): 2
+        - code 312 (coniferous forest): 5
+        - code 313 (mixed forest): 4
+        - code 321 (natural grasslands): 2
+        - code 322, 323, 324 (shrub/transitional): 3
+        - code 333 (sparse vegetation): 2
+    """
+    # Valid codes for WUI analysis: 200-324 or 333
+    valid_mask = ((clc_arr >= 200) & (clc_arr < 325)) | (clc_arr == 333)
+
+    conditions = [
+        (clc_arr >= 200) & (clc_arr < 300),
+        clc_arr == 311,
+        clc_arr == 312,
+        clc_arr == 313,
+        clc_arr == 321,
+        (clc_arr == 322) | (clc_arr == 323) | (clc_arr == 324),
+        clc_arr == 333,
+    ]
+    choices = [1, 2, 5, 4, 2, 3, 2]
+
+    result = np.select(conditions, choices, default=np.nan).astype(np.float32)
+
+    # Apply IUF mask if provided
+    if iuf_mask is not None:
+        result[~iuf_mask] = np.nan
+
+    # Set invalid codes to nan
+    result[~valid_mask] = np.nan
+
+    return result
+
+
 def wui(input_road, input_clc, file_name:str='IUF_Risk_Map',
         output_folder:Path=Path('OUTPUT'),
         reference_file=Path('REFERENCE')/'MDT'/'DEM_NationalScenario_2013.tif', 
@@ -115,7 +170,7 @@ def wui(input_road, input_clc, file_name:str='IUF_Risk_Map',
     
     if export_image:
 
-        save_file(out_img, file_name, output_folder, out_meta,extensions=['tif','png'], fig=fig1, meta_intact=True)
+        save_file(out_img, out_meta, file_name, output_folder,extensions=['tif','png'], fig=fig1, meta_intact=True)
     
     return out_img
         

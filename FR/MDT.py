@@ -26,9 +26,6 @@ def mdt(ruta_mdt,output_folder:str|Path=Path('OUTPUT'),
         Tuple of (mdt_risk, slope_risk, aspect_risk) arrays with values 1-5
     """
     
-    # XXX: Hay dos parametros de salida que no se usan: ruta_slope, ruta_aspect
-
-
     print('MDT, SLOPE and ASPECT Layers processing...')
     output_folder=Path(output_folder)
 
@@ -77,7 +74,7 @@ def mdt(ruta_mdt,output_folder:str|Path=Path('OUTPUT'),
                  (aspect >= 270) & (aspect < 315),
                  (aspect >= 315) & (aspect < 360),
     ]
-    #XXX: La secuencia de choices es correcta?
+ 
     choices= [1, 2, 3, 4, 5, 5, 3, 2]
     aspect_re = np.select(conditions,choices,default=0,).astype('int32')
     fig_aspect, ax_aspect = default_imshow(aspect_re, 'Aspect Risk Map', {'label':'Risk'})
@@ -91,9 +88,9 @@ def mdt(ruta_mdt,output_folder:str|Path=Path('OUTPUT'),
         meta_out = meta.copy()
         meta_out.update(dtype='int32', count=1, nodata=-9999, driver='GTiff')
     
-        save_file(mdt_re, 'MDT_RISK_MAP', output_folder, meta_out, extensions=['tif','png'], fig=fig_mdt, meta_intact=True)
-        save_file(slope_re, 'SLOPE_RISK_MAP', output_folder, meta_out, extensions=['tif','png'], fig=fig_slpe, meta_intact=True)
-        save_file(aspect_re, 'ASPECT_RISK_MAP', output_folder, meta_out, extensions=['tif','png'], fig=fig_aspect, meta_intact=True)
+        save_file(mdt_re, meta_out, 'MDT_RISK_MAP', output_folder, extensions=['tif','png'], fig=fig_mdt, meta_intact=True)
+        save_file(slope_re, meta_out, 'SLOPE_RISK_MAP', output_folder, extensions=['tif','png'], fig=fig_slpe, meta_intact=True)
+        save_file(aspect_re, meta_out, 'ASPECT_RISK_MAP', output_folder, extensions=['tif','png'], fig=fig_aspect, meta_intact=True)
 
 
     print("MDT, SLOPE and ASPECT Layers completed.")

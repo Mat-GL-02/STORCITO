@@ -12,6 +12,63 @@ from FR.rutinas.setup import (
 )
 from pathlib import Path
 
+
+def ndvi_from_array(b4: np.ndarray, b8: np.ndarray) -> np.ndarray:
+    """Calculate NDVI (Normalized Difference Vegetation Index) from band arrays.
+
+    NDVI = (NIR - Red) / (NIR + Red)
+
+    Args:
+        b4: 2D array of Band 4 (Red) reflectance values.
+        b8: 2D array of Band 8 (NIR) reflectance values.
+
+    Returns:
+        2D array (float32) with NDVI values in range [-1, 1].
+        Division by zero and invalid values are set to np.nan.
+    """
+    b4_f = b4.astype(np.float32)
+    b8_f = b8.astype(np.float32)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ndvi = (b8_f - b4_f) / (b8_f + b4_f)
+
+    # Replace inf and invalid values with nan
+    ndvi[~np.isfinite(ndvi)] = np.nan
+
+    return ndvi
+
+
+def ndvi_risk_from_array(ndvi_arr: np.ndarray) -> np.ndarray:
+    """Reclassify NDVI values into fire risk categories.
+
+    Args:
+        ndvi_arr: 2D array with NDVI values.
+
+    Returns:
+        2D array (float32) with risk categories (1-5).
+        Lower NDVI (less vegetation) = higher risk.
+        Invalid values are set to np.nan.
+
+    Notes:
+        Risk classification:
+        - NDVI <= 0.27: Risk 5 (very high - sparse/no vegetation)
+        - 0.27 < NDVI <= 0.40: Risk 4 (high)
+        - 0.40 < NDVI <= 0.54: Risk 3 (moderate)
+        - 0.54 < NDVI <= 0.67: Risk 2 (low)
+        - NDVI > 0.67: Risk 1 (very low - dense vegetation)
+    """
+    conditions = [
+        ndvi_arr <= 0.27,
+        (ndvi_arr > 0.27) & (ndvi_arr <= 0.40),
+        (ndvi_arr > 0.40) & (ndvi_arr <= 0.54),
+        (ndvi_arr > 0.54) & (ndvi_arr <= 0.67),
+        ndvi_arr > 0.67
+    ]
+    choices = [5, 4, 3, 2, 1]
+
+    return np.select(conditions, choices, default=np.nan).astype(np.float32)
+
+
 def ndvi(b4:str|Path,b8:str|Path,output_folder:str='OUTPUT',export_image:bool=False)->tuple[np.ndarray,np.ndarray]:
     """Calculate NDVI (Normalized Difference Vegetation Index) from Sentinel-2 bands.
 
@@ -35,32 +92,21 @@ def ndvi(b4:str|Path,b8:str|Path,output_folder:str='OUTPUT',export_image:bool=Fa
         meta_ref = src_b3.meta.copy()
     with rasterio.open(b8) as src_b8:
         band8 = src_b8.read(1).astype('float32')
-    
+
     mini_info=parse_filename(b4.name)
     name_id=mini_info.id
 
-    ndvi = np.array( (band8 - band4) / (band8 + band4) )
-    
-    condiciones = [
-        ndvi <= 0.27,
-        (ndvi > 0.27) & (ndvi <= 0.40),
-        (ndvi > 0.40) & (ndvi <= 0.54),
-        (ndvi > 0.54) & (ndvi <= 0.67),
-        ndvi > 0.67
-    ]
-
-    valores = [5, 4, 3, 2, 1]
-
-    reclasificado = np.select(condiciones, valores, default=0).astype('int32')
+    ndvi = ndvi_from_array(band4, band8)
+    reclasificado = ndvi_risk_from_array(ndvi)
     
     fig1,ax1=default_imshow(ndvi,'NDVI')
     fig2,ax2=default_imshow(reclasificado,'NDVI Risk Map')
     
     if export_image:
     
-        save_file(ndvi, name_id, output_folder, meta_ref, 
+        save_file(ndvi, meta_ref, name_id, output_folder,
                   'NDVI',extensions=['tif','tiff','png'], fig=fig1)
-        save_file(reclasificado, name_id, output_folder, meta_ref, 
+        save_file(reclasificado, meta_ref, name_id, output_folder,
                   'NDVI_Risk_Map',extensions=['tif','tiff','png'], fig=fig2)
 
 
@@ -112,12 +158,12 @@ def ndvi_folder(input_folder:str='INPUT',output_folder:str='OUTPUT',indices:list
         for ndvi_i,meta_ref_i,extra_info in zip(ndvi,METAS,IDS): 
 
             fig1,ax1=default_imshow(ndvi_i,'NDVI')
-            save_file(ndvi_i, extra_info, output_folder, meta_ref_i, 'NDVI',extensions=['tif','tiff','png'], fig=fig1)
+            save_file(ndvi_i, meta_ref_i, extra_info, output_folder, 'NDVI',extensions=['tif','tiff','png'], fig=fig1)
            
         for reclasificado_i,meta_ref_i,extra_info in zip(reclasificados,METAS,IDS):
 
             fig1,ax1=default_imshow(reclasificado_i,'NDVI Risk Map')
-            save_file(reclasificado_i, extra_info, output_folder, meta_ref_i, 'NDVI_Risk_Map',extensions=['tif','tiff','png'], fig=fig1)
+            save_file(reclasificado_i, meta_ref_i, extra_info, output_folder, 'NDVI_Risk_Map',extensions=['tif','tiff','png'], fig=fig1)
            
 
 if __name__ == "__main__":
