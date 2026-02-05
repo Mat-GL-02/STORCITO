@@ -39,7 +39,7 @@ def f_w_index(input_folder:str|Path,file_name:str='FWI_Risk_Map',output_folder:P
         
     Notes:
         - Uses Van Wagner FWI system (Canadian Forest Service)
-        - Maintains daily continuity: ffmc → dmc → dc across iterations
+        - Maintains daily continuity: ffmc -> dmc -> dc across iterations
         - Wind converted from m/s to km/h, temperature from K to °C
         - Final reclassification: 1=low, 2=moderate, 3=high, 4=very high, 5=extreme
     """

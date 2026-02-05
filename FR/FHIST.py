@@ -61,7 +61,7 @@ def fire_history(input_folder:str|Path=Path('INPUT'), output_folder:str|Path = P
         key=band_date_sort
     )
     
-    # ✅ CACHE: Parse una sola vez
+    # CACHE: Parse una sola vez
     prev_cache = {f: parse_filename(f) for f in prev_files}
     post_cache = {f: parse_filename(f) for f in post_files}
     

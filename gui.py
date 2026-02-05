@@ -1,6 +1,6 @@
 """
-Sistema de procesamiento de archivos con menú interactivo
-Instalación:
+File processing system with interactive menu
+Installation:
     pip install rich questionary
 """
 
@@ -19,8 +19,8 @@ from questionary import Style
 
 console = Console()
 
-# Estilo personalizado
-estilo_custom = Style([
+# Custom style
+custom_style = Style([
     ('qmark', 'fg:#673ab7 bold'),
     ('question', 'fg:#ffffff bold'),
     ('answer', 'fg:#00ff00 bold'),
@@ -32,421 +32,347 @@ estilo_custom = Style([
     ('text', 'fg:#ffffff'),
 ])
 
-# Variables globales para las rutas
-carpeta_entrada:str="INPUT"
-carpeta_salida:str="OUTPUT"
+# Global variables for paths
+input_folder: str = "INPUT"
+output_folder: str = "OUTPUT"
 
-def validar_carpeta(path):
-    """Valida que la carpeta exista"""
+def validate_folder(path):
+    """Validates that the folder exists"""
     if not path:
-        return "La ruta no puede estar vacía"
-    
+        return "Path cannot be empty"
+
     path_obj = Path(path)
     if not path_obj.exists():
-        return "La carpeta no existe"
+        return "Folder does not exist"
     if not path_obj.is_dir():
-        return "La ruta debe ser una carpeta"
+        return "Path must be a folder"
     return True
 
-def leer_archivos_entrada():
-    """Lee los nombres de archivos en la carpeta de entrada"""
-    if not carpeta_entrada:
-        return []
-    
-    path_entrada = Path(carpeta_entrada)
-    if not path_entrada.exists():
-        return []
-    
-    try:
-        archivos = [f.name for f in path_entrada.iterdir() if f.is_file()]
-        return archivos
-    except Exception as e:
-        console.print(f"[red]Error al leer archivos: {e}[/red]")
+def read_input_files():
+    """Reads file names from the input folder"""
+    if not input_folder:
         return []
 
-def calcular_metricas_carpeta():
-    """Calcula métricas de la carpeta de entrada"""
-    if not carpeta_entrada:
-        return None
-    
-    path_entrada = Path(carpeta_entrada)
-    if not path_entrada.exists():
-        return None
-    
+    input_path = Path(input_folder)
+    if not input_path.exists():
+        return []
+
     try:
-        archivos = list(path_entrada.iterdir())
-        archivos_files = [f for f in archivos if f.is_file()]
-        
-        # Calcular métricas
-        metricas = {
-            'total_archivos': len(archivos_files),
-            'tamano_total': sum(f.stat().st_size for f in archivos_files),
-            'extensiones': {},
+        files = [f.name for f in input_path.iterdir() if f.is_file()]
+        return files
+    except Exception as e:
+        console.print(f"[red]Error reading files: {e}[/red]")
+        return []
+
+def calculate_folder_metrics():
+    """Calculates metrics for the input folder"""
+    if not input_folder:
+        return None
+
+    input_path = Path(input_folder)
+    if not input_path.exists():
+        return None
+
+    try:
+        items = list(input_path.iterdir())
+        files = [f for f in items if f.is_file()]
+
+        # Calculate metrics
+        metrics = {
+            'total_files': len(files),
+            'total_size': sum(f.stat().st_size for f in files),
+            'extensions': {},
         }
-        
-        # Contar extensiones
-        for archivo in archivos_files:
-            ext = archivo.suffix.lower() or 'sin extensión'
-            metricas['extensiones'][ext] = metricas['extensiones'].get(ext, 0) + 1
-        
-        return metricas
-    
+
+        # Count extensions
+        for file in files:
+            ext = file.suffix.lower() or 'no extension'
+            metrics['extensions'][ext] = metrics['extensions'].get(ext, 0) + 1
+
+        return metrics
+
     except Exception as e:
-        console.print(f"[red]Error al calcular métricas: {e}[/red]")
+        console.print(f"[red]Error calculating metrics: {e}[/red]")
         return None
 
-def formatear_tamano(bytes):
-    """Formatea bytes a una unidad legible"""
-    for unidad in ['B', 'KB', 'MB', 'GB']:
+def format_size(bytes):
+    """Formats bytes to a readable unit"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
         if bytes < 1024.0:
-            return f"{bytes:.2f} {unidad}"
+            return f"{bytes:.2f} {unit}"
         bytes /= 1024.0
     return f"{bytes:.2f} TB"
 
-def generar_subtitulo_metricas(metricas, mostrar_archivos=False):
-    """Genera un subtítulo con métricas de la carpeta"""
-    if not metricas:
-        return "[red]No se encontraron archivos en la carpeta de entrada[/red]"
-    
-    lineas = []
-    
-    # Información básica
-    lineas.append(f"[dim]Total de archivos: [bold]{metricas['total_archivos']}[/bold][/dim]")
-    lineas.append(f"[dim]Tamaño total: [bold]{formatear_tamano(metricas['tamano_total'])}[/bold][/dim]")
-    
-    # Extensiones
-    if metricas['extensiones']:
-        ext_texto = ", ".join([f"{ext}: {count}" for ext, count in sorted(metricas['extensiones'].items())])
-        lineas.append(f"[dim]Extensiones: {ext_texto}[/dim]")
-    
+def generate_metrics_subtitle(metrics, show_files=False):
+    """Generates a subtitle with folder metrics"""
+    if not metrics:
+        return "[red]No files found in input folder[/red]"
 
-    # Lista de archivos (opcional)
-    if mostrar_archivos:
-        archivos = leer_archivos_entrada()
-        if archivos:
-            lineas.append("\n[dim]Archivos:[/dim]")
-            archivos_texto = "\n".join([f"  • {archivo}" for archivo in archivos[:10]])
-            if len(archivos) > 10:
-                archivos_texto += f"\n  [dim]... y {len(archivos) - 10} archivo(s) más[/dim]"
-            lineas.append(archivos_texto)
-    
-    return "\n".join(lineas)
+    lines = []
 
-def mostrar_configuracion_actual():
-    """Muestra la configuración actual en una tabla"""
-    tabla = Table(title="⚙️ Configuración Actual", box=box.ROUNDED)
-    tabla.add_column("Parámetro", style="cyan", no_wrap=True)
-    tabla.add_column("Valor", style="green")
-    
-    entrada_text = carpeta_entrada if carpeta_entrada else "[red]No configurada[/red]"
-    salida_text = carpeta_salida if carpeta_salida else "[red]No configurada[/red]"
-    
-    tabla.add_row("Carpeta de entrada", entrada_text)
-    tabla.add_row("Carpeta de salida", salida_text)
-    
-    # Contar archivos si hay carpeta configurada
-    if carpeta_entrada:
-        archivos = leer_archivos_entrada()
-        tabla.add_row("Archivos encontrados", str(len(archivos)))
-    
-    console.print(tabla)
+    # Basic information
+    lines.append(f"[dim]Total files: [bold]{metrics['total_files']}[/bold][/dim]")
+    lines.append(f"[dim]Total size: [bold]{format_size(metrics['total_size'])}[/bold][/dim]")
 
-def configuracion_inicial():
-    """Menú de configuración inicial"""
-    global carpeta_entrada, carpeta_salida
-    
+    # Extensions
+    if metrics['extensions']:
+        ext_text = ", ".join([f"{ext}: {count}" for ext, count in sorted(metrics['extensions'].items())])
+        lines.append(f"[dim]Extensions: {ext_text}[/dim]")
+
+
+    # File list (optional)
+    if show_files:
+        files = read_input_files()
+        if files:
+            lines.append("\n[dim]Files:[/dim]")
+            files_text = "\n".join([f"  • {file}" for file in files[:10]])
+            if len(files) > 10:
+                files_text += f"\n  [dim]... and {len(files) - 10} more file(s)[/dim]"
+            lines.append(files_text)
+
+    return "\n".join(lines)
+
+def show_current_config():
+    """Shows the current configuration in a table"""
+    table = Table(title="⚙️ Current Configuration", box=box.ROUNDED)
+    table.add_column("Parameter", style="cyan", no_wrap=True)
+    table.add_column("Value", style="green")
+
+    input_text = input_folder if input_folder else "[red]Not configured[/red]"
+    output_text = output_folder if output_folder else "[red]Not configured[/red]"
+
+    table.add_row("Input folder", input_text)
+    table.add_row("Output folder", output_text)
+
+    # Count files if folder is configured
+    if input_folder:
+        files = read_input_files()
+        table.add_row("Files found", str(len(files)))
+
+    console.print(table)
+
+def initial_configuration():
+    """Initial configuration menu"""
+    global input_folder, output_folder
+
     while True:
         console.clear()
         console.print(Panel(
-            "[bold cyan]Configura las carpetas de trabajo[/bold cyan]\n"
-            "[dim]Ingresa las rutas completas de las carpetas[/dim]",
-            title="📁 Configuración Inicial",
+            "[bold cyan]Configure working folders[/bold cyan]\n"
+            "[dim]Enter the full paths of the folders[/dim]",
+            title="📁 Initial Configuration",
             border_style="cyan"
         ))
-        
-        mostrar_configuracion_actual()
-        
-        opcion = questionary.select(
-            "\n¿Qué deseas hacer?",
+
+        show_current_config()
+
+        option = questionary.select(
+            "\nWhat would you like to do?",
             choices=[
-                questionary.Choice("📂 Configurar carpeta de entrada", value="entrada"),
-                questionary.Choice("📁 Configurar carpeta de salida", value="salida"),
+                questionary.Choice("📂 Configure input folder", value="input"),
+                questionary.Choice("📁 Configure output folder", value="output"),
                 questionary.Separator(),
-                questionary.Choice("✓ Continuar al menú principal", value="continuar"),
-                questionary.Choice("← Volver", value="volver"),
+                questionary.Choice("✓ Continue to main menu", value="continue"),
+                questionary.Choice("← Back", value="back"),
             ],
-            style=estilo_custom
+            style=custom_style
         ).ask()
-        
-        if opcion == "volver" or opcion is None:
+
+        if option == "back" or option is None:
             return False
-        
-        if opcion == "continuar":
-            if not carpeta_entrada or not carpeta_salida:
-                console.print("\n[red]⚠ Debes configurar ambas carpetas antes de continuar[/red]")
-                input("\nPresiona Enter para continuar...")
+
+        if option == "continue":
+            if not input_folder or not output_folder:
+                console.print("\n[red]⚠ You must configure both folders before continuing[/red]")
+                input("\nPress Enter to continue...")
                 continue
             return True
-        
-        if opcion == "entrada":
-            ruta = questionary.path(
-                "Ruta de la carpeta de entrada:",
-                default=carpeta_entrada if carpeta_entrada else "./INPUT",
-                validate=validar_carpeta,
-                style=estilo_custom
+
+        if option == "input":
+            path = questionary.path(
+                "Input folder path:",
+                default=input_folder if input_folder else "./INPUT",
+                validate=validate_folder,
+                style=custom_style
             ).ask()
-            
-            if ruta:
-                carpeta_entrada = ruta
-                console.print(f"\n[green]✓ Carpeta de entrada configurada: {carpeta_entrada}[/green]")
-                archivos = leer_archivos_entrada()
-                console.print(f"[cyan]Se encontraron {len(archivos)} archivo(s)[/cyan]")
-                # input("\nPresiona Enter para continuar...")
-        
-        elif opcion == "salida":
-            ruta = questionary.path(
-                "Ruta de la carpeta de salida:",
-                default=carpeta_salida if carpeta_salida else "./OUTPUT",
-                validate=validar_carpeta,
-                style=estilo_custom
+
+            if path:
+                input_folder = path
+                console.print(f"\n[green]✓ Input folder configured: {input_folder}[/green]")
+                files = read_input_files()
+                console.print(f"[cyan]Found {len(files)} file(s)[/cyan]")
+                # input("\nPress Enter to continue...")
+
+        elif option == "output":
+            path = questionary.path(
+                "Output folder path:",
+                default=output_folder if output_folder else "./OUTPUT",
+                validate=validate_folder,
+                style=custom_style
             ).ask()
-            
-            if ruta:
-                carpeta_salida = ruta
-                console.print(f"\n[green]✓ Carpeta de salida configurada: {carpeta_salida}[/green]")
-                # input("\nPresiona Enter para continuar...")
+
+            if path:
+                output_folder = path
+                console.print(f"\n[green]✓ Output folder configured: {output_folder}[/green]")
+                # input("\nPress Enter to continue...")
 
 def single_case_menu():
-    """Menú Single Case con opciones de procesamiento"""
-    
+    """Single Case menu with processing options"""
+
     while True:
         console.clear()
-        
-        # Calcular métricas
-        metricas = calcular_metricas_carpeta()
-        subtitulo = generar_subtitulo_metricas(metricas, mostrar_archivos=False)
-        
+
+        # Calculate metrics
+        metrics = calculate_folder_metrics()
+        subtitle = generate_metrics_subtitle(metrics, show_files=False)
+
         console.print(Panel(
-            f"[bold green]Procesamiento de casos individuales[/bold green]\n\n{subtitulo}",
+            f"[bold green]Individual case processing[/bold green]\n\n{subtitle}",
             title="🔧 Single Case",
             border_style="green"
         ))
-        
-        opcion = questionary.select(
-            "\nSelecciona una opción de procesamiento:",
+
+        option = questionary.select(
+            "\nSelect a processing option:",
             choices=[
-                questionary.Choice("1️⃣  Opción 1: GCI", value="opcion1"),
-                questionary.Choice("2️⃣  Opción 2: NDVI", value="opcion2"),
-                questionary.Choice("3️⃣  Opción 3: NDMI", value="opcion3"),
+                questionary.Choice("1️⃣  Option 1: GCI", value="option1"),
+                questionary.Choice("2️⃣  Option 2: NDVI", value="option2"),
+                questionary.Choice("3️⃣  Option 3: NDMI", value="option3"),
                 questionary.Separator("─" * 50),
-                questionary.Choice("⚙️  Reconfigurar carpetas", value="config"),
-                questionary.Choice("← Volver al menú principal", value="volver"),
+                questionary.Choice("⚙️  Reconfigure folders", value="config"),
+                questionary.Choice("← Back to main menu", value="back"),
             ],
-            style=estilo_custom,
-            instruction="(Usa las flechas para navegar)"
+            style=custom_style,
+            instruction="(Use arrows to navigate)"
         ).ask()
-        
-        if opcion == "volver" or opcion is None:
+
+        if option == "back" or option is None:
             break
-        
-        if opcion == "config":
-            configuracion_inicial()
+
+        if option == "config":
+            initial_configuration()
             continue
-        
-        # Verificar que haya archivos antes de procesar
-        if not metricas or metricas['total_archivos'] == 0:
-            console.print("\n[red]⚠ No hay archivos para procesar en la carpeta de entrada[/red]")
-            input("\nPresiona Enter para continuar...")
+
+        # Verify there are files before processing
+        if not metrics or metrics['total_files'] == 0:
+            console.print("\n[red]⚠ No files to process in input folder[/red]")
+            input("\nPress Enter to continue...")
             continue
-        
-        # Procesar según la opción seleccionada
+
+        # Process according to selected option
         console.clear()
 
-        def band_calc_info(inputs:list[str]) :
-            valids,_=check_valid_entries(inputs,input_folder=carpeta_entrada) #type : ignore
+        def band_calc_info(inputs: list[str]):
+            valids, _ = check_valid_entries(inputs, input_folder=input_folder)  # type: ignore
 
-            time_intervals=[f' {v.fecha_inicio}  -->  {v.fecha_fin}' for v in valids]
+            time_intervals = [f' {v.fecha_inicio}  -->  {v.fecha_fin}' for v in valids]
 
             console.print(Panel(
-                f"[cyan]Bandas de trabajo : {inputs}\n[/cyan]"
-                f"Detectadas {len(valids)} instancias temporales  ",
+                f"[cyan]Working bands: {inputs}\n[/cyan]"
+                f"Detected {len(valids)} time instances  ",
             ))
-            
+
             intervals_chosen = (questionary.checkbox(
-            " Selecciona una opción de procesamiento : \n",
-            choices=[questionary.Choice(title=name,value=id) for id,name in  enumerate(time_intervals)],
-            style=estilo_custom,
-            instruction="(Usa las flechas para navegar y espacio para seleccionar)"
+            " Select a processing option: \n",
+            choices=[questionary.Choice(title=name, value=id) for id, name in enumerate(time_intervals)],
+            style=custom_style,
+            instruction="(Use arrows to navigate and space to select)"
             ).ask())
 
             return intervals_chosen
 
-        
-        if opcion == "opcion1":
-            
-            inputs=["B03","B08"]
+
+        if option == "option1":
+
+            inputs = ["B03", "B08"]
 
             chosen_intervals_idxs = band_calc_info(inputs)
-            gci_folder(input_folder=carpeta_entrada,output_folder=carpeta_salida,indices=chosen_intervals_idxs,export_image=True)
+            gci_folder(input_folder=input_folder, output_folder=output_folder, indices=chosen_intervals_idxs, export_image=True)
 
-        
-        elif opcion == "opcion2":
-            inputs=["B04","B08"]
 
-            chosen_intervals_idxs = band_calc_info(inputs)
-            ndvi_folder(input_folder=carpeta_entrada,output_folder=carpeta_salida,indices=chosen_intervals_idxs,export_image=True)
-        
-        elif opcion == "opcion3":
-            inputs=["B08","B11"]
+        elif option == "option2":
+            inputs = ["B04", "B08"]
 
             chosen_intervals_idxs = band_calc_info(inputs)
-        
-        
-        # console.print("\n[green]✓ Proceso completado exitosamente![/green]")
-        input("\nPresiona Enter para volver al menú...")
+            ndvi_folder(input_folder=input_folder, output_folder=output_folder, indices=chosen_intervals_idxs, export_image=True)
 
-def temporal_case_menu():
-    """Menú Temporal Case con opciones de procesamiento"""
-    
-    while True:
-        console.clear()
-        
-        # Calcular métricas
-        metricas = calcular_metricas_carpeta()
-        subtitulo = generar_subtitulo_metricas(metricas, mostrar_archivos=True)
-        
-        console.print(Panel(
-            f"[bold magenta]Procesamiento temporal de casos[/bold magenta]\n\n{subtitulo}",
-            title="⏱️ Temporal Case",
-            border_style="magenta"
-        ))
-        
-        opcion = questionary.select(
-            "\nSelecciona una opción de procesamiento temporal:",
-            choices=[
-                questionary.Choice("1️⃣  Opción 1: Análisis temporal", value="opcion1"),
-                questionary.Choice("2️⃣  Opción 2: Series de tiempo", value="opcion2"),
-                questionary.Choice("3️⃣  Opción 3: Tendencias", value="opcion3"),
-                questionary.Choice("4️⃣  Opción 4: Predicciones", value="opcion4"),
-                questionary.Choice("5️⃣  Opción 5: Comparativa temporal", value="opcion5"),
-                questionary.Separator("─" * 50),
-                questionary.Choice("⚙️  Reconfigurar carpetas", value="config"),
-                questionary.Choice("← Volver al menú principal", value="volver"),
-            ],
-            style=estilo_custom,
-            instruction="(Usa las flechas para navegar)"
-        ).ask()
-        
-        if opcion == "volver" or opcion is None:
-            break
-        
-        if opcion == "config":
-            configuracion_inicial()
-            continue
-        
-        # Verificar que haya archivos antes de procesar
-        if not metricas or metricas['total_archivos'] == 0:
-            console.print("\n[red]⚠ No hay archivos para procesar en la carpeta de entrada[/red]")
-            input("\nPresiona Enter para continuar...")
-            continue
-        
-        # Procesar según la opción seleccionada
-        console.clear()
-        
-        if opcion == "opcion1":
-            console.print(Panel(
-                f"[magenta]Analizando patrones temporales en {metricas['total_archivos']} archivo(s)...\n\n"
-                f"Carpeta entrada: {carpeta_entrada}\n"
-                f"Carpeta salida: {carpeta_salida}\n\n"
-                f"Procesando datos temporales...[/magenta]",
-                title="1️⃣ Análisis temporal"
-            ))
-        
-        elif opcion == "opcion2":
-            console.print(Panel(
-                f"[magenta]Procesando series de tiempo de {metricas['total_archivos']} archivo(s)...[/magenta]",
-                title="2️⃣ Series de tiempo"
-            ))
-        
-        elif opcion == "opcion3":
-            console.print(Panel(
-                f"[magenta]Analizando tendencias en {metricas['total_archivos']} archivo(s)...[/magenta]",
-                title="3️⃣ Tendencias"
-            ))
-        
-        elif opcion == "opcion4":
-            console.print(Panel(
-                f"[magenta]Generando predicciones de {metricas['total_archivos']} archivo(s)...[/magenta]",
-                title="4️⃣ Predicciones"
-            ))
-        
-        elif opcion == "opcion5":
-            console.print(Panel(
-                f"[magenta]Realizando comparativa temporal de {metricas['total_archivos']} archivo(s)...[/magenta]",
-                title="5️⃣ Comparativa temporal"
-            ))
-        
-        console.print("\n[green]✓ Proceso temporal completado exitosamente![/green]")
-        input("\nPresiona Enter para volver al menú...")
+        elif option == "option3":
+            inputs = ["B08", "B11"]
 
-def menu_principal():
-    """Menú principal del sistema"""
-    
-    # Primero ejecutar configuración inicial
-    if not configuracion_inicial():
-        console.print("\nConfiguración cancelada. Saliendo...\n")
+            chosen_intervals_idxs = band_calc_info(inputs)
+
+
+        # console.print("\n[green]✓ Process completed successfully![/green]")
+        input("\nPress Enter to return to menu...")
+
+def static_case_menu():
+    pass
+
+def dynamic_case_menu():
+    pass
+
+def main_menu():
+    """Main system menu"""
+
+    # First run initial configuration
+    if not initial_configuration():
+        console.print("\nConfiguration cancelled. Exiting...\n")
         return
-    
+
     while True:
         console.clear()
         console.print(Panel(
-            "[bold green]Sistema de Procesamiento de Archivos[/bold green]\n"
-            "[dim]Usa las flechas ↑↓ para navegar y Enter para seleccionar[/dim]",
-            title="🎯 Menú Principal",
+            "[bold green]File Processing System[/bold green]\n"
+            "[dim]Use arrows ↑↓ to navigate and Enter to select[/dim]",
+            title="🎯 Main Menu",
             border_style="green"
         ))
-        
-        mostrar_configuracion_actual()
-        
-        opcion = questionary.select(
-            "\n¿Qué deseas hacer?",
+
+        show_current_config()
+
+        option = questionary.select(
+            "\nWhat would you like to do?",
             choices=[
-                questionary.Choice("🔧  Single Case", value="single"),
-                questionary.Choice("⏱️  Temporal Case", value="temporal"),
-                questionary.Choice("⚙️  Reconfigurar carpetas", value="config"),
+                questionary.Choice("🔧 Raw Inputs", value="single"),
+                questionary.Choice("⏱️ Static Case", value="static"),
+                questionary.Choice("⏱️ Dinamic Case", value="dynamic"),
+                questionary.Choice("⚙️ Reconfigure folders", value="config"),
                 questionary.Separator("─" * 50),
-                questionary.Choice("🚪 Salir", value="salir"),
+                questionary.Choice("🚪 Exit", value="exit"),
             ],
-            style=estilo_custom
+            style=custom_style
         ).ask()
-        
-        if opcion is None or opcion == "salir":
-            if opcion == "salir":
-                confirmar = questionary.confirm(
-                    "¿Estás seguro de que deseas salir?",
+
+        if option is None or option == "exit":
+            if option == "exit":
+                confirm = questionary.confirm(
+                    "Are you sure you want to exit?",
                     default=False,
-                    style=estilo_custom
+                    style=custom_style
                 ).ask()
-                
-                if confirmar:
-                    console.print("\n[bold red]👋 ¡Hasta luego![/bold red]\n")
+
+                if confirm:
+                    console.print("\n[bold red]👋 Goodbye![/bold red]\n")
                     break
             else:
-                # Ctrl+C en menu_principal - propagar
+                # Ctrl+C in main_menu - propagate
                 raise KeyboardInterrupt()
-        
-        elif opcion == "single":
+
+        elif option == "single":
             single_case_menu()
+
+        elif option == "static":
+            static_case_menu()
         
-        elif opcion == "temporal":
-            temporal_case_menu()
-        
-        elif opcion == "config":
-            configuracion_inicial()
+        elif option == "dynamic":
+            dynamic_case_menu()
+
+        elif option == "config":
+            initial_configuration()
 
 
 if __name__ == "__main__":
     try:
-        menu_principal()
+        main_menu()
     except KeyboardInterrupt:
-        console.print("\n\n[bold red]👋 Programa interrumpido. ¡Hasta luego![/bold red]\n")
+        console.print("\n\n[bold red]👋 Program interrupted. Goodbye![/bold red]\n")

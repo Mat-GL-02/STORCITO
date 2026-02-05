@@ -331,7 +331,7 @@ def create_lst_png(
 
 
 # =============================================================================
-# FULL PIPELINE: SENTINEL-3 → CLIPPED FINAL LST
+# FULL PIPELINE: SENTINEL-3 -> CLIPPED FINAL LST
 # =============================================================================
 
 def process_sentinel3_lst(
