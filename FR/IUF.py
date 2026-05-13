@@ -1,103 +1,84 @@
 import os
-import rasterio
-
-import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 import geopandas as gpd
-
-from FR.rutinas.setup import *
-from pathlib import Path
-from rasterio.io import MemoryFile
-from rasterio.transform import from_bounds
+import rasterio
 from rasterio.features import rasterize
 from rasterio.mask import mask
+import matplotlib.pyplot as plt
 
-def wui(input_road, input_clc, file_name:str='IUF_Risk_Map',
-        output_folder:Path=Path('OUTPUT'),
-        reference_file=Path('REFERENCE')/'MDT'/'DEM_NationalScenario_2013.tif', 
-        export_image:bool = False,
-        show_plots:bool = False)->None:
-    
-    """_summary_
+def wui(input_road, input_clc, output_iuf):
+    print('Processing Wildland-Urban Interfaces layer...')
+    while True:
+        save_answer = input("Do you want to save the Wildland-Urban Interface risk map? (y/n): ").strip().lower()
+        if save_answer in ('y','n'): break
+        print("Enter 'y' or 'n'.")
 
-    Args:
-        input_road (_type_): _description_
-        input_clc (_type_): _description_
-        file_name (str, optional): _description_. Defaults to 'IUF_Risk_Map'.
-        output_folder (Path, optional): _description_. Defaults to Path('OUTPUT').
-        reference_file (_type_, optional): _description_. Defaults to Path('REFERENCE')/'MDT'/'DEM_NationalScenario_2013.tif'.
-        export_image (bool, optional): _description_. Defaults to False.
-        show_plots (bool, optional): _description_. Defaults to False.
-    """
-    
-    print('Wildland-Urban Interfaces layer processing...')
-
-    # Leer capas una sola vez
+    # Read layers only once
     road = gpd.read_file(input_road).to_crs(epsg=32629)
     clc = gpd.read_file(input_clc).to_crs(epsg=32629)
 
-    # Convertir Code_18 a numérico de una vez
+    # Convert Code_18 to numeric once
     clc['Code_18'] = pd.to_numeric(clc['Code_18'], errors='coerce')
     
-    # Phase I: Intersectar con buffer de 2000m - sin guardar a disco
-    bf2000 = road.buffer(2000).union_all()
-    poligonos = clc[clc.intersects(bf2000)].copy()
-    print("Intersecting polygons found (phase I):", len(poligonos))
+    # Phase I: Intersect with 2000m buffer - without saving to disk
+    bf2000 = road.buffer(2000).unary_union
+    polygons = clc[clc.intersects(bf2000)].copy()
+    print("Intersecting polygons found (phase I):", len(polygons))
+    if len(polygons) == 0:
+        print("No intersections found."); return
     
-    if len(poligonos) == 0:
-        print("No se encontraron intersecciones."); return
-    
-    # Phase I: Filtrar código < 200 y >= 100
-    pol1 = poligonos[(poligonos['Code_18'] >= 100) & (poligonos['Code_18'] < 200)]
+    # Phase I: Filter code < 200 and >= 100
+    pol1 = polygons[(polygons['Code_18'] < 200) & (polygons['Code_18'] >= 100)]
     print("Filtered polygons (phase I):", len(pol1))
     
-    # Crear máscara IUF (buffer 400 - buffer 50) - en memoria, SIN hacer difference
-  
-    bf400 = pol1.buffer(400).union_all()
-    # bf50 = pol1.buffer(50).union_all()
-    IUF_mask_geom = bf400 
+    # Create IUF mask (buffer 400 - buffer 50) - in memory, WITHOUT difference
+    # Use only the two buffers without subtraction (faster for rasterization)
+    bf400 = pol1.buffer(400).unary_union
+    bf50 = pol1.buffer(50).unary_union
+    IUF_mask_geom = bf400  # Use the outer buffer
 
-    # Phase II: Filtrar código >= 200 y < 325, o == 333 + intersección en una pasada
-    mask_condition=(((poligonos['Code_18'] < 325) & (poligonos['Code_18'] >= 200)) | 
-                    (poligonos['Code_18'] == 333)) & \
-                    (poligonos.intersects(IUF_mask_geom))
-    
-    pol2_sel = poligonos[mask_condition].copy()
+    # Phase II: Filter code >= 200 and < 325, or == 333 + intersection in one pass
+    pol2_sel = polygons[
+        (((polygons['Code_18'] < 325) & (polygons['Code_18'] >= 200)) | 
+         (polygons['Code_18'] == 333)) & 
+        (polygons.intersects(IUF_mask_geom))
+    ].copy()
     print("Filtered and intersected polygons (phase II):", len(pol2_sel))
     
-    # Asignar valores de riesgo con np.select 
+    # Assign risk values with np.select (vectorized in one pass)
+    import numpy as np
     risk_array = np.zeros(len(pol2_sel), dtype=np.uint8)
     code = pol2_sel['Code_18'].values
     
     conditions = [
-        code < 300,
         code == 311,
         code == 312,
         code == 313,
         code == 321,
         (code == 322) | (code == 323) | (code == 324),
         code == 333,
-        ]
+        code < 300
+    ]
+    choices = [2, 5, 4, 2, 3, 2, 1]
     
-    choices = [ 1, 2, 5, 4, 2, 3, 2]
-     
-    pol2_sel['risk'] = np.select(conditions, choices, default=0)
+    risk_array = np.select(conditions, choices, default=0)
+    pol2_sel['risk'] = risk_array
     
-    # Obtener parámetros de rasterización desde DEM
-    with rasterio.open(reference_file) as src:
+    # Get rasterization parameters from DEM
+    with rasterio.open(r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\Forest Fire Risk Map\DEM_NationalScenario_2013.tif') as src:
         b = src.bounds
         x_res = int((b.right - b.left)/25)
         y_res = int((b.top - b.bottom)/25)
-        transform =from_bounds(b.left, b.bottom, b.right, b.top, x_res, y_res)
+        transform = rasterio.transform.from_bounds(b.left, b.bottom, b.right, b.top, x_res, y_res)
         crs_str = src.crs.to_string()
     
-    # Rasterizar directamente en memoria
+    # Rasterize directly in memory
     geom_vals = ((g, v) for g, v in zip(pol2_sel.geometry, pol2_sel['risk']))
     raster_data = rasterize(geom_vals, out_shape=(y_res, x_res), transform=transform, fill=0, dtype=rasterio.uint8)
     
-    # Aplicar máscara (crop) - crear raster enmascarado
+    # Apply mask (crop) - create masked raster
     mask_geoms = [IUF_mask_geom]
+    from rasterio.io import MemoryFile
     with MemoryFile() as memfile:
         with memfile.open(driver='GTiff', height=y_res, width=x_res, count=1, dtype=rasterio.uint8, crs=crs_str, transform=transform) as mem_src:
             mem_src.write(raster_data, 1)
@@ -106,27 +87,35 @@ def wui(input_road, input_clc, file_name:str='IUF_Risk_Map',
             out_meta = mem_src.meta.copy()
             out_meta.update({"driver":"GTiff", "height":out_img.shape[1], "width":out_img.shape[2], "transform":out_tr})
     
-
-
-    fig1,ax1=default_imshow(out_img[0],'WUI Risk Map',{'label':'Risk'})
+    # Prepare directories
+    rasters_dir = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\re'
+    png_dir = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\IUF'
+    base_name = os.path.splitext(os.path.basename(output_iuf))[0]
+    os.makedirs(rasters_dir, exist_ok=True)
+    os.makedirs(png_dir, exist_ok=True)
     
-    if show_plots:
-        plt.show()
+    raster_path = os.path.join(rasters_dir, f'{base_name}.tif')
+    png_path = os.path.join(png_dir, f'{base_name}.png')
     
-    if export_image:
-
-        save_file(out_img, file_name, output_folder, out_meta,extensions=['tif','png'], fig=fig1, meta_intact=True)
+    # Save raster once (without reading from disk later)
+    with rasterio.open(raster_path, 'w', **out_meta) as dst:
+        dst.write(out_img)
+    try:
+        with rasterio.open(output_iuf, 'w', **out_meta) as dst:
+            dst.write(out_img)
+    except Exception:
+        pass
     
-    return out_img
-        
-if __name__ == "__main__":
-
-    import cProfile
-    import pstats
-
-    with cProfile.Profile() as profile:
-        wui()
-
-    results = pstats.Stats(profile)
-    results.sort_stats(pstats.SortKey.TIME)
-    results.print_stats(20)
+    # Visualize from in-memory data (without reading raster from disk)
+    plt.imshow(out_img[0], cmap='Reds')
+    plt.colorbar()
+    plt.title('WUI Risk Map')
+    
+    if save_answer == 'y':
+        plt.savefig(png_path, dpi=300, bbox_inches='tight')
+        print(f'WUI Layer completed and saved. TIFF: {raster_path}; PNG: {png_path}')
+    else:
+        print('WUI Layer completed without saving.')
+    
+    plt.show()
+    return
