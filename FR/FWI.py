@@ -1,158 +1,163 @@
 import os
-import rasterio
 
-import netCDF4 as nc
+import netCDF4 as Nc
 import numpy as np
 import numpy.ma as ma
+from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 import rutinas.FWI_Equations as Fwi
-# import tifffile as tif
-from FR.rutinas.setup import default_imshow, save_file
-from pathlib import Path
+import rasterio
 from rasterio.transform import from_origin
-from scipy.interpolate import griddata
 
 
-def f_w_index(input_folder:str|Path,file_name:str='FWI_Risk_Map',output_folder:Path|str=Path('OUTPUT'),
-    export_image:bool=False,show_plots:bool=False,crs:str="EPSG:4326")->np.ndarray:
-
-    """Calculates Canadian Forest Fire Weather Index (FWI) from netCDF climate data.
-    
-    Reads daily netCDF files with meteorological data (temperature, humidity, wind, 
-    precipitation), interpolates to 360x360 grid, calculates FWI indices sequentially
-    maintaining state between days, and reclassifies into 5 risk levels.
-    
-    Args:
-        input_folder: Path to folder containing daily .nc files
-        file_name: Identifier for output files. Defaults to 'FWI_Risk_Map'
-        output_folder: Output folder for saving results. Defaults to 'OUTPUT'
-        export_image: Whether to save GeoTIFF/PNG files. Defaults to False
-        show_plots (bool, optional): _description_. Defaults to False.
-        crs: Coordinate reference system. Defaults to "EPSG:4326"
-        
-    Returns:
-        Reclassified FWI array (int32) with values 1-5 for risk levels
-        
-    Raises:
-        ValueError: If no .nc files found in input_folder
-        
-    Notes:
-        - Uses Van Wagner FWI system (Canadian Forest Service)
-        - Maintains daily continuity: ffmc → dmc → dc across iterations
-        - Wind converted from m/s to km/h, temperature from K to °C
-        - Final reclassification: 1=low, 2=moderate, 3=high, 4=very high, 5=extreme
-    """
-
-    input_folder = Path(input_folder)
-    output_folder = Path(output_folder)
+def f_w_index(folder_nc, output_fwi):
 
     print("Fire Weather Index Layer processing...")
 
+    # Ask if user wants to save generated images
+    save = input("Do you want to save the generated images? (y/n): ").strip().lower()
+    save_image = (save == "y")
+
+    # Save rutes
+    rasters_dir = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\re'
+    png_path = r"C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\FWI\FWI.png"
+    tif_path = output_fwi
+    tif_path_re = os.path.join(rasters_dir, 'FWI.tif')
+
+    if save_image:
+        os.makedirs(os.path.dirname(png_path), exist_ok=True)
+        os.makedirs(os.path.dirname(tif_path), exist_ok=True)
+        os.makedirs(rasters_dir, exist_ok=True)
+
     # --------------------------------------------------------
-    # LECTURA DE ARCHIVOS .NC
+    # LECTURE & ORDERING OF .NC FILES
     # --------------------------------------------------------
-    lista_nc = [file for file in input_folder.iterdir() if file.suffix == '.nc']
+    list_nc = [ 
+        os.path.join(folder_nc, f)
+        for f in os.listdir(folder_nc) if f.endswith(".nc")
+    ]
+    list_nc.sort()
 
-    if not lista_nc:
-        raise ValueError("No netCDF files found in input folder")
+    f0 = p0 = d0 = None
+    grid_info = None
+    FWI = None
 
-    GRID_SIZE = 360
-    VERTICAL_LEVEL = 15  
+    for i, file in enumerate(list_nc):
+        dataset = Nc.Dataset(file)
 
-    # --------------------------------------------------------
-    # PROCESAMIENTO DE CADA ARCHIVO .NC
-    for id_file, file in enumerate(lista_nc):
-        
-        with nc.Dataset(file) as dataset:  
+        x_coord = ma.getdata(dataset["lon"])
+        y_coord = ma.getdata(dataset["lat"])
 
-            x_coord = ma.getdata(dataset["lon"])
-            y_coord = ma.getdata(dataset["lat"])
-            
-            wind = ma.getdata(dataset["mod"][VERTICAL_LEVEL])
-            rain = ma.getdata(np.sum(dataset["prec"][:], axis=0))
-            humidity = ma.getdata(dataset["rh"][VERTICAL_LEVEL])
-            temperature = ma.getdata(dataset["temp"][VERTICAL_LEVEL])
-            
-            mes = nc.num2date(dataset["time"][0], dataset["time"].units).month
-        
-        # Preparación de la malla de interpolación
+        time_var = dataset["time"]
+        times = Nc.num2date(time_var[:], time_var.units)
+        tiempo0 = times[0]
+        key_day = (tiempo0.year, tiempo0.month, tiempo0.day)
+        mes = tiempo0.month
+
+        # day of the file
+        idx_dia = np.arange(0, 24)
+        idx_mid = 12  # representative hour ~13:00
+
+        wind_all = ma.getdata(dataset["mod"][:])    # (96, ny, nx)
+        prec_all = ma.getdata(dataset["prec"][:])   # acumulated
+        rh_all = ma.getdata(dataset["rh"][:])
+        temp_all = ma.getdata(dataset["temp"][:])
+
+        wind_mid = wind_all[idx_mid]
+        hum_mid = rh_all[idx_mid]
+        temp_mid = temp_all[idx_mid]
+
+        # ---- daily rainfall from accumulated ----
+        # hourly increments: P_t - P_{t-1}
+        prec_incr = np.diff(prec_all, axis=0, prepend=prec_all[0:1])
+        prec_incr = np.maximum(prec_incr, 0.0)
+
+        rain_day = prec_incr[idx_dia].sum(axis=0)
+
         xmin, xmax = x_coord.min(), x_coord.max()
         ymin, ymax = y_coord.min(), y_coord.max()
-        
-        x = np.linspace(xmin, xmax, GRID_SIZE)
-        y = np.linspace(ymin, ymax, GRID_SIZE)
+        x = np.linspace(xmin, xmax, 360)
+        y = np.linspace(ymin, ymax, 360)
         X, Y = np.meshgrid(x, y)
-        
-        # Flatten una sola vez para todas las interpolaciones
+
         xf = x_coord.flatten()
         yf = y_coord.flatten()
-        coords = (xf, yf)
-        grid_coords = (X, Y)
-        
-        # Interpolación con conversión de unidades
-        wind_m = griddata(coords, wind.flatten() * 3.6, grid_coords, method='nearest')  # m/s -> km/h
-        rain_m = griddata(coords, rain.flatten(), grid_coords, method='nearest')
-        hum_m = griddata(coords, humidity.flatten(), grid_coords, method='nearest')
-        temp_m = griddata(coords, temperature.flatten() - 273.15, grid_coords, method='nearest')  # K -> °C
-        
-        # Inicialización en el primer paso
-        if id_file == 0:
-            f0 = np.full_like(hum_m, 85.0)  
-            p0 = np.full_like(hum_m, 6.0)
-            d0 = np.full_like(hum_m, 15.0)
-        
-        # Cálculo de índices FWI
-        f = Fwi.ffmc(temp_m, hum_m, wind_m, rain_m, f0) # type: ignore[name-defined]
-        p = Fwi.dmc(temp_m, hum_m, rain_m, p0, mes) # type: ignore[name-defined]
-        d = Fwi.dc(temp_m, rain_m, mes, d0) # type: ignore[name-defined]
-        
-        # Actualización de condiciones previas para el siguiente día
+
+        wind_m = griddata((xf, yf), (wind_mid * 3.6).flatten(), (X, Y),
+                          method="nearest")
+        hum_m = griddata((xf, yf), hum_mid.flatten(), (X, Y), method="nearest")
+        temp_m = griddata((xf, yf),
+                          (temp_mid - 273.15).flatten(), (X, Y),
+                          method="nearest")
+        rain_m = griddata((xf, yf), rain_day.flatten(), (X, Y),
+                          method="nearest")
+
+        if grid_info is None:
+            grid_info = (xf, yf, X.shape)
+
+        # Inicialize codes for the first day
+        if f0 is None:
+            f0 = np.ones_like(hum_m) * 85.0
+            p0 = np.ones_like(hum_m) * 6.0
+            d0 = np.ones_like(hum_m) * 15.0
+
+        # --------------------------------------------------------
+        # DAILY CALCULATION OF FWI FOR THE DAY OF THE FILE
+        # --------------------------------------------------------
+        f = Fwi.ffmc(temp_m, hum_m, wind_m, rain_m, f0)
+        p = Fwi.dmc(temp_m, hum_m, rain_m, p0, mes)
+        d = Fwi.dc(temp_m, rain_m, mes, d0)
+
+        ISI = Fwi.isi(wind_m, f)
+        BUI = Fwi.bui(p, d)
+        FWI = Fwi.fwi(ISI, BUI)
+
         f0, p0, d0 = f, p, d
-        
-        print(f"Día {id_file+1} procesado. Mes: {mes}")
-        print(f"\t FFMC max: {np.max(f):.2f}")
-        print(f"\t DMC max:  {np.max(p):.2f}")
-        print(f"\t DC max:   {np.max(d):.2f}\n")
 
+        # quick diagnosis
+        date_str = f"{tiempo0.year:04d}-{tiempo0.month:02d}-{tiempo0.day:02d}"
+        print(f"{date_str}  daily rainfall (mm)  "
+              f"min={float(np.nanmin(rain_m)):.2f}  "
+              f"max={float(np.nanmax(rain_m)):.2f}")
+        print(f"Processed day: {key_day}. Max FFMC: {np.max(f)}")
+        print(f"Max DMC: {np.max(p)}")
+        print(f"Max DC: {np.max(d)}\n")
 
-    # --------------------------------------------------------
-    # FWI final - procesar directamente en memoria
-    # --------------------------------------------------------
-    
-    ISI = Fwi.isi(wind_m, f)# type: ignore[name-defined]
-    BUI = Fwi.bui(p, d)# type: ignore[name-defined]
-    FWI = Fwi.fwi(ISI, BUI)# type: ignore[name-defined]
-    
-    # Invertir eje Y (flip) sin guardar a disco
+         # Choose a central pixel of Galicia, for example
+        iy, ix = hum_m.shape[0] // 2, hum_m.shape[1] // 2
+
+        print(
+        f"{date_str}  pixel ({iy},{ix})  "
+        f"rain={float(rain_m[iy, ix]):.2f}  "
+        f"FFMC={float(f[iy, ix]):.2f}  "
+        f"DMC={float(p[iy, ix]):.2f}  "
+        f"DC={float(d[iy, ix]):.2f}"
+    )
+
+        dataset.close()
+
+    if FWI is None:
+        print("Cannot calculate FWI (no valid data available).")
+        return
+
+    # -----------------------------------------------------------------------------------
+    # FINAL FWI: invert Y axis and prepare raster. Unnecessary if raster functionality is removed
+    # -----------------------------------------------------------------------------------
     data = FWI[::-1, :]
 
-    # Calcular parámetros de transformación
-    pixel_size_x = (xf.max() - xf.min()) / (data.shape[1] - 1) # type: ignore[name-defined]
-    pixel_size_y = (yf.max() - yf.min()) / (data.shape[0] - 1) # type: ignore[name-defined]
-    transform = from_origin(xf.min(), yf.max(), pixel_size_x, pixel_size_y) # type: ignore[name-defined]
-    # crs = "EPSG:4326"
+    xf, yf, shape = grid_info
+    pixel_size_x = (xf.max() - xf.min()) / (data.shape[1] - 1)
+    pixel_size_y = (yf.max() - yf.min()) / (data.shape[0] - 1)
+    transform = from_origin(xf.min(), yf.max(), pixel_size_x, pixel_size_y)
+    crs = "EPSG:4326"
 
-    # --------------------------------------------------------
-    # RECLASIFICACIÓN
-    # --------------------------------------------------------
     fwi_final = data.astype("float32")
-
     fwi_clas = np.zeros_like(fwi_final, dtype="int32")
-
-    selection =[fwi_final <= 3,
-                (fwi_final > 3) & (fwi_final <= 13),
-                (fwi_final > 13) & (fwi_final <= 23),
-                (fwi_final > 23) & (fwi_final <= 28),
-                fwi_final > 28]
-
-    choices=[1, 2, 3, 4, 5]
-
-    fwi_clas = np.select(selection, choices, default=0)
-    # --------------------------------------------------------
-    # METADATOS DEL RASTER
-    # --------------------------------------------------------
-    
-    # FIXME: widht and height may be swapped
+    fwi_clas[fwi_final <= 3] = 1
+    fwi_clas[(fwi_final > 3) & (fwi_final <= 13)] = 2
+    fwi_clas[(fwi_final > 13) & (fwi_final <= 23)] = 3
+    fwi_clas[(fwi_final > 23) & (fwi_final <= 28)] = 4
+    fwi_clas[fwi_final > 28] = 5
 
     meta = {
         "driver": "GTiff",
@@ -162,34 +167,37 @@ def f_w_index(input_folder:str|Path,file_name:str='FWI_Risk_Map',output_folder:P
         "transform": transform,
         "width": fwi_clas.shape[1],
         "height": fwi_clas.shape[0],
-        "nodata": -9999
+        "nodata": -9999,
     }
 
-    # --------------------------------------------------------
-    # GENERAR FIGURA
-    # --------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(8, 6))
+    img = ax.imshow(fwi_clas, cmap="Reds")
+    fig.colorbar(img, ax=ax)
+    ax.set_title("Fire Weather Index Risk Map")
+    plt.show()
 
-    fig1,ax1=default_imshow(fwi_clas,'Fire Weather Index Risk Map',{'label':'Risk'})
+    if save_image:
+        fig.savefig(png_path, dpi=300, bbox_inches="tight")
+        print(f"PNG guardado en: {png_path}")
 
-    if show_plots:
-        plt.show()
+        with rasterio.open(tif_path, "w", **meta) as dst:
+            dst.write(fwi_clas, 1)
+        print(f"TIF guardado en: {tif_path}")
 
-    if export_image:
+        # Save also in rasters_dir like MDT
+        with rasterio.open(tif_path_re, "w", **meta) as dst_re:
+            dst_re.write(fwi_clas, 1)
+        print(f"TIF guardado en: {tif_path_re}")
 
-        save_file(fwi_clas, file_name, output_folder, meta, extensions=['tif','png'], fig=fig1, meta_intact=True)
+    else:
+        # Save at least the main output path even if not saving images
+        os.makedirs(os.path.dirname(tif_path), exist_ok=True)
+        with rasterio.open(tif_path, "w", **meta) as dst:
+            dst.write(fwi_clas, 1)
+        print(f"TIF guardado en: {tif_path}")
+        os.makedirs(rasters_dir, exist_ok=True)
+        with rasterio.open(tif_path_re, "w", **meta) as dst_re:
+            dst_re.write(fwi_clas, 1)
+        print(f"TIF guardado en: {tif_path_re}")
 
     print("Fire Weather Index Layer completed.")
-
-    return fwi_clas
-
-if __name__ == "__main__":
-
-    import cProfile
-    import pstats
-
-    with cProfile.Profile() as profile:
-        f_w_index(r'INPUT/FWI')
-
-    results = pstats.Stats(profile)
-    results.sort_stats(pstats.SortKey.TIME)
-    results.print_stats(20)
