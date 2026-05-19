@@ -296,10 +296,10 @@ meteo_topic = sum(aligned_layers[k] * w for k, w in zip(["meteo", "lst"], we_met
 
 final_layers = [topo_topic, veg_topic, ai_topic, meteo_topic]
 comparison_matrix = np.array([
-    [1,   1/4, 1/2, 1/3],
-    [4,   1,   3,   2],
-    [2,   1/3, 1,   1/3],
-    [3,   1/2, 3,   1]
+    [1,   1/4, 1/2, 1/3], # Topography
+    [4,   1,   3,   2],   # Vegetation
+    [2,   1/3, 1,   1/3], # Socioeconomics (AI)
+    [3,   1/2, 3,   1]    # Meteorology (FWI & LST)
 ])
 
 final_weights = calculate_weights(normalize_matrix(comparison_matrix))
