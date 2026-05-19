@@ -9,19 +9,16 @@ import matplotlib.pyplot as plt
 
 # Import the necessary rasterio tools
 from rasterio.fill import fillnodata
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.warp import reproject, Resampling
 import rasterio
-from rasterio.mask import mask
-from osgeo import gdal
 
 # Import personalized modules
 import FR.FMT_eu as Fmt
 import FR.MDT as Mdt
 import FR.IUF as Wui
 import FR.infra as Infra
-import FR.NDVI as Ndvi
-import FR.FHIST as Fhist
 import FR.FWI as Fwi
+import FR.TWI as Twi
 import FR.cropped as Cropped
 from FR.ahp import normalize_matrix, calculate_weights, consistency_ratio
 
@@ -38,22 +35,17 @@ input_mdt = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\DTM\DTM.tif'
 input_slope = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\DTM\SLOPE.tif'
 input_aspect = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\DTM\ASPECT.tif'
 
-# Sentinel for NDVI
-input_b4_ndvi = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\Sentinel\B4.tiff'
-input_b8_ndvi = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\Sentinel\B8.tiff'
+# TWI
+input_twi = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\TWI\TWI.tif'
 
-# Historical band
-input_hist_pre = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\HIST\Bandas_pre'
-input_hist_post = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\HIST\Bandas_post'
-
-# Fuels
+# Fuels (FMT)
 input_fmt = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\FUELS\FMT_NationalScenario_2019.tif'
 
-# Infraestructure & WUI
+# Infrastructure & WUI
 input_infra = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\INFRA\galicia_entera.shp'
 input_clc = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\IUF\CLC_galicia.shp'
 
-# Meteorology
+# Meteorology (FWI)
 input_fwi_folder = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\FWI'
 
 # ---------------------------
@@ -70,27 +62,31 @@ os.makedirs(output_folder_cropped, exist_ok=True)
 # 1.3. BASE OUTPUT RASTERS
 # ---------------------------
 
-output_mdt = os.path.join(output_folder_re, 'MDT.tif')
+output_mdt   = os.path.join(output_folder_re, 'MDT.tif')
 output_slope = os.path.join(output_folder_re, 'SLOPE.tif')
-output_aspect = os.path.join(output_folder_re, 'ASPECT.tif')
+output_aspect= os.path.join(output_folder_re, 'ASPECT.tif')
 
-output_ndvi = os.path.join(output_folder_re, 'ndvi.tif')
-output_fhist = os.path.join(output_folder_re, 'HIST.tif')
-output_fmt = os.path.join(output_folder_re, 'FMT.tif')
+output_twi      = os.path.join(output_folder_re, 'twi.tif')
+output_twi_risk = os.path.join(output_folder_re, 'twi_risk_map.tif')
+
+output_fmt   = os.path.join(output_folder_re, 'FMT.tif')
 output_infra = os.path.join(output_folder_re, 'infra_layer.tif')
-output_wui = os.path.join(output_folder_re, 'WUI.tif')
-output_fwi = os.path.join(output_folder_re, 'FWI.tif')
+output_wui   = os.path.join(output_folder_re, 'WUI.tif')
+output_fwi   = os.path.join(output_folder_re, 'FWI.tif')
 
 # ---------------------------
 # 1.4. EXECUTION CONTROL
 # ---------------------------
-run_mdt = False
-run_ndvi = True
-run_fhist = False
-run_fmt = False
+
+run_mdt   = True
+run_twi   = False  
+run_fmt   = False
 run_infra = False
-run_wui = False
-run_fwi = False
+run_wui   = False
+run_fwi   = False
+
+# Data for FWI avaliable from september 2021
+use_fwi = True
 
 # ---------------------------
 # 1.5. LAYER GENERATION
@@ -106,17 +102,10 @@ if run_mdt:
         output_aspect
     )
 
-if run_ndvi:
-    Ndvi.Ndvi(
-        input_b4_ndvi,
-        input_b8_ndvi,
-    )
-
-if run_fhist:
-    Fhist.Fhist(
-        input_hist_pre,
-        input_hist_post,
-        output_fhist
+if run_twi:
+    Twi.Twi(
+        input_twi,
+        output_twi
     )
 
 if run_fmt:
@@ -150,9 +139,9 @@ print("Todas las capas base del caso estático generadas/disponibles en 're\\'."
 # 2. CROP WITH BUFFER (Cropped Folder)
 # ==========================================
 print("\nStarting crop of layers to the study area...")
-output_folder_re      = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\re'
+output_folder_re = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\re'
 output_folder_cropped = r'C:\Users\Mateo G\Desktop\STORCITO\Salida Datos\Cropped'
-shapefile_for_buffer  = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\shapefile\Galicia.shp'
+shapefile_for_buffer = r'C:\Users\Mateo G\Desktop\STORCITO\Fotos\shapefile\Galicia.shp'
 buffer_distance = 3000
 
 Cropped.cropped(output_folder_re, output_folder_cropped, shapefile_for_buffer, buffer_distance)
@@ -165,7 +154,7 @@ print("\nAligning layers and processing missing data...")
 def align_raster_with_resampling(source_path, reference_path):
     with rasterio.open(source_path) as src, rasterio.open(reference_path) as ref:
         if (src.width == ref.width and src.height == ref.height and
-                src.transform == ref.transform and src.crs == ref.crs):
+            src.transform == ref.transform and src.crs == ref.crs):
             return src.read(1)
         src_data = src.read(1)
         aligned_data = np.zeros((ref.height, ref.width), dtype=np.float32)
@@ -184,11 +173,10 @@ raster_paths = {
     "mdt":   os.path.join(output_folder_cropped, 'MDT_cropped.tif'),
     "slope": os.path.join(output_folder_cropped, 'SLOPE_cropped.tif'),
     "aspect":os.path.join(output_folder_cropped, 'ASPECT_cropped.tif'),
+    "twi":   os.path.join(output_folder_cropped, 'twi_cropped.tif'),
     "ftm":   os.path.join(output_folder_cropped, 'FMT_cropped.tif'),
-    "ndvi":  os.path.join(output_folder_cropped, 'ndvi_cropped.tif'),
     "wui":   os.path.join(output_folder_cropped, 'WUI_cropped.tif'),
     "infra": os.path.join(output_folder_cropped, 'infra_layer_cropped.tif'),
-    "fhist": os.path.join(output_folder_cropped, 'HIST_cropped.tif'),
     "meteo": os.path.join(output_folder_cropped, 'FWI_cropped.tif'),
 }
 
@@ -204,25 +192,21 @@ for key, path in raster_paths.items():
     data = align_raster_with_resampling(path, reference_path)
 
     # 1. Standardize what a "gap" means (convert all to np.nan temporarily)
-    if key in ['infra', 'fhist']:
-        data_clean = np.where(data == -9999, np.nan, data)
-    else:
-        data_clean = np.where(data <= 0, np.nan, data)
+    data_clean = np.where(data <= 0, np.nan, data)
 
     # 2. Logic for filling gaps based on layer type
-    if key in ['ndvi', 'meteo', 'aspect']:
-        # They are gaps due to error (clouds, mesh edges). We interpolate quickly.
+    if key in ['meteo', 'aspect', 'twi']:
+        # Gaps debidos a error (p.ej. bordes de malla). Interpolamos.
         valid_mask = ~np.isnan(data_clean)
         data_filled = fillnodata(
             data_clean,
             mask=valid_mask,
-            max_search_distance=25.0, 
+            max_search_distance=25.0,
             smoothing_iterations=0
         )
-        # Ensure no residual NaNs remain
         data_filled = np.nan_to_num(data_filled, nan=0.0)
     else:
-        # They are real gaps (no WUI, no fuel). Risk 0.
+        # Gaps reales (sin WUI, sin combustible, etc.). Riesgo 0.
         data_filled = np.nan_to_num(data_clean, nan=0.0)
 
     # 3. Strictly cut to the master mask
@@ -234,33 +218,49 @@ for key, path in raster_paths.items():
 # 4. AHP (Analytic Hierarchy Process)
 # ==========================================
 print("\nCalculating AHP weights and summing layers...")
-vegetation_matrix = np.array([[1, 3], [1/3, 1]])
-we_veg = calculate_weights(normalize_matrix(vegetation_matrix))
-veg_topic = sum(aligned_layers[k] * w for k, w in zip(["ftm", "ndvi"], we_veg))
 
-ai_matrix = np.array([[1, 3], [1/3, 1]])
+# Vegetation topic
+vegetation_matrix = np.array([[1]])
+we_veg = calculate_weights(normalize_matrix(vegetation_matrix))
+veg_topic = aligned_layers["ftm"] * we_veg[0]
+
+# AI topic (infra + WUI)
+ai_matrix = np.array([
+    [1,   2],
+    [1/2, 1]
+])
 we_ai = calculate_weights(normalize_matrix(ai_matrix))
 ai_topic = sum(aligned_layers[k] * w for k, w in zip(["infra", "wui"], we_ai))
 
-topography_matrix = np.array([[1, 2, 3], [1/2, 1, 2], [1/3, 1/2, 1]])
+# Topography topic 
+topography_matrix = np.array([
+    [1,   2,   3,   3],
+    [1/2, 1,   2,   2],
+    [1/3, 1/2, 1,   2],
+    [1/3, 1/2, 1/2, 1]
+])
 we_topo = calculate_weights(normalize_matrix(topography_matrix))
-topo_topic = sum(aligned_layers[k] * w for k, w in zip(["mdt", "slope", "aspect"], we_topo))
+topo_topic = sum(aligned_layers[k] * w for k, w in zip(["mdt", "slope", "aspect", "twi"], we_topo))
 
-# With FWI (August 2021 onwards)
-final_layers = [veg_topic, topo_topic, aligned_layers["meteo"], ai_topic, aligned_layers["fhist"]]
-comparison_matrix = np.array([[1,   3,   2,   2,   5],
-                              [1/3, 1,   1/3, 1/3, 3],
-                              [1/2, 3,   1,   3,   5],
-                              [1/2, 3,   1/3, 1,   3],
-                              [1/5, 1/3, 1/5, 1/3, 1]])
-r'''
-# Without FWI (2016 - August 2021)
-final_layers = [veg_topic, topo_topic, ai_topic, aligned_layers["fhist"]]
-comparison_matrix = np.array([[1, 3, 2, 2],
-                              [1/3, 1, 1/3, 1/3],
-                              [1/2, 3, 1, 3],
-                              [1/2, 3, 1/3, 1]])
-'''
+# ------------------------------------------
+# Matriz principal: con o sin FWI según use_fwi
+# ------------------------------------------
+if use_fwi:
+    final_layers = [topo_topic, ai_topic, veg_topic, aligned_layers["meteo"]]
+    comparison_matrix = np.array([
+        [1,   1/3, 3, 3],  # Topography
+        [3,   1,   2, 3],    # Socioeconomics (AI)
+        [1/3,   1/2, 1,   2],  # Vegetation 
+        [1/3,   1/3, 1/2,   1]     # Meteorology (FWI)
+    ])
+else:
+    final_layers = [topo_topic, ai_topic , veg_topic ]
+    comparison_matrix = np.array([
+        [1,   1/3, 3],   # Topography
+        [3,   1,   2],     # Socioeconomics (AI)
+        [1/3,   1/2, 1]      # Vegetation 
+    ])
+
 final_weights = calculate_weights(normalize_matrix(comparison_matrix))
 
 cr = consistency_ratio(comparison_matrix, final_weights)
@@ -299,17 +299,18 @@ with rasterio.open(output_path) as mapa_final:
     # We force the 0 values (outside the map) to be transparent for visualization
     plot_data = np.where(fr_clasificado == 0, np.nan, fr_clasificado)
 
-    # Show the image
-    plt.figure(figsize=(10, 8))
-    plt.imshow(plot_data, cmap='Reds', vmin=1, vmax=5)
-    cbar = plt.colorbar(shrink=0.8)
-    cbar.set_ticks([1, 2, 3, 4, 5])
-    cbar.set_label('Risk class')
-    plt.title('Forest Fire Risk Map - Galicia')
-    plt.tight_layout()
-    plt.show()
+# Show the image
+plt.figure(figsize=(10, 8))
+plt.imshow(plot_data, cmap='Reds', vmin=1, vmax=5)
+cbar = plt.colorbar(shrink=0.8)
+cbar.set_ticks([1, 2, 3, 4, 5])
+cbar.set_label('Risk class')
+plt.title('Forest Fire Risk Map - Galicia (Static)')
+plt.tight_layout()
+plt.show()
 
-    # Save the final classified map
+# Save the final classified map
+with rasterio.open(output_path) as mapa_final:
     meta = mapa_final.profile
     meta.update(dtype='int32')
     with rasterio.open(fr_final, 'w', **meta) as dst:
