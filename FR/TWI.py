@@ -39,11 +39,11 @@ def Twi(input_twi, output_twi=None, output_twi_risk=None, show_plots=True):
 
     # Reclasification: assign values 1-5 for risk levels
     reclasificado = np.zeros(twi.shape, dtype=np.uint8)
-    reclasificado[(twi <= p20) & valid] = 1
-    reclasificado[(twi > p20) & (twi <= p40)] = 2
+    reclasificado[(twi <= p20) & valid] = 5
+    reclasificado[(twi > p20) & (twi <= p40)] = 4
     reclasificado[(twi > p40) & (twi <= p60)] = 3
-    reclasificado[(twi > p60) & (twi <= p80)] = 4
-    reclasificado[(twi > p80) & valid] = 5
+    reclasificado[(twi > p60) & (twi <= p80)] = 2
+    reclasificado[(twi > p80) & valid] = 1
 
     if save_outputs:
         print('Saving TIFF files...')
